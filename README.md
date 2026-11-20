@@ -1,6 +1,6 @@
 # Nightfall Desktop
 
-A calm, Mac-inspired night-sky setup for Windows 10: a desktop clock with tonight's real moon, a full-screen sky that appears when you step away, a matching browser new tab and theme, and a hand-made icon set. Everything is lightweight, needs nothing extra installed, and can be turned off or undone.
+A calm, Mac-inspired night-sky setup for Windows 10: a desktop clock with tonight's real moon, a full-screen sky that appears when you step away, and a matching new tab page and browser theme. Everything is lightweight, needs nothing extra installed, and can be turned off or undone.
 
 ![My desktop](screenshots/desktop.png)
 
@@ -51,11 +51,6 @@ A new tab page for Brave or any Chromium browser.
 ### Nightfall Theme
 Deep plum and lavender browser colors to match the new tab.
 
-### Icons
-A matching set of rounded icons for folders, apps, This PC, Recycle Bin, and more, with a script that applies them all, including large Start menu tiles.
-
-![Icons](screenshots/icons.png)
-
 ### Tweaks
 - Remove the shortcut arrows from desktop icons (with an undo)
 
@@ -72,7 +67,6 @@ Requires Windows 10 and Brave (or another Chromium browser). Each part works on 
 | Moon Clock | Copy `moon-clock` to `C:\Moon Clock` and double-click `build.bat`. Right-click the moon in the tray for options. |
 | Nightfall Tab | `brave://extensions` → turn on Developer mode → **Load unpacked** → pick the `nightfall-tab` folder. |
 | Nightfall Theme | Same as above, with the `nightfall-theme` folder. |
-| Icons | Double-click `icons\apply-icons.bat`. Undo with `undo-icons.bat`. |
 | Shortcut arrows | Double-click `tweaks\remove-arrows.bat`. Undo with `restore-arrows.bat`. |
 
 If you used TaskbarX or TranslucentTB before, quit them first, since Moon Clock now does both jobs.
@@ -103,4 +97,4 @@ After that, running **backup.bat** uploads changes automatically.
 
 ## License
 
-Code and original icons are under the MIT License (see `LICENSE`). The moon image is NASA's, credited above.
+Code is under the MIT License (see `LICENSE`). The moon image is NASA's, credited above.
