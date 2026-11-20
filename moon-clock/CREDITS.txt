@@ -1,0 +1,2 @@
+Moon surface (moon.png): NASA's Scientific Visualization Studio, CGI Moon Kit
+https://svs.gsfc.nasa.gov/4720 (data from the Lunar Reconnaissance Orbiter camera team)

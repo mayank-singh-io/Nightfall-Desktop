@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "Nightfall Tab",
+  "version": "1.0.0",
+  "description": "A calm night-sky new tab page with a clock, search, and your favorite sites.",
+  "chrome_url_overrides": { "newtab": "newtab.html" },
+  "permissions": ["search", "favicon"],
+  "icons": { "128": "icon128.png", "48": "icon48.png" }
+}
