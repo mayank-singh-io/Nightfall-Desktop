@@ -58,7 +58,21 @@ Deep plum and lavender browser colors to match the new tab.
 
 Requires Windows 10 and Brave (or another Chromium browser). Each part works on its own.
 
-**Easiest:** download this repo (Code → Download ZIP), extract it, and double-click **restore.bat**. It asks before each part.
+**One command:** open PowerShell and paste:
+
+```powershell
+irm https://raw.githubusercontent.com/mayank-singh-io/Nightfall-Desktop/main/install.ps1 | iex
+```
+
+It downloads this repo, asks which parts you want, builds the Moon Clock, and opens your browser's extensions page so you can add the new tab and theme (browsers require that last step by hand). It's always worth reading a script before running it: [install.ps1](install.ps1).
+
+**To uninstall:**
+
+```powershell
+irm https://raw.githubusercontent.com/mayank-singh-io/Nightfall-Desktop/main/uninstall.ps1 | iex
+```
+
+**Or download it:** Code → Download ZIP, extract it, and double-click **restore.bat**. It asks before each part.
 
 **Or by hand:**
 
@@ -83,7 +97,7 @@ git init
 git add -A
 git commit -m "First backup"
 git branch -M main
-git remote add origin https://github.com/mayank-singh-io/nightfall-desktop.git
+git remote add origin https://github.com/mayank-singh-io/Nightfall-Desktop.git
 git push -u origin main
 ```
 
