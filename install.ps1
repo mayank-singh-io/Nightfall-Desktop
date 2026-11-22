@@ -26,14 +26,19 @@
     }
 
     Say ""
-    Say "  Nightfall Desktop" Magenta
+    Say "  Nightfall Desktop v1.0.0" Magenta
     Say "  A calm night-sky setup for Windows 10`n" DarkGray
 
     if ([Environment]::OSVersion.Version.Major -lt 10) { Say "This needs Windows 10 or later." Red; return }
+    $build = 0
+    try { $build = [int](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').CurrentBuildNumber } catch { }
+    $isWin11 = $build -ge 22000
+    if ($isWin11) { Say "Note: you're on Windows 11. Everything works except taskbar centering and transparency, which are Windows 10 only.`n" Yellow }
 
     # ---------- what to install
     $doClock  = Ask "Install Moon Clock (desktop clock, away-mode sky, taskbar centering and transparency)?"
     $doStart  = if ($doClock) { Ask "  Start Moon Clock automatically with Windows?" } else { $false }
+    $doTaskbar = if ($doClock -and -not $isWin11) { Ask "  Let Moon Clock center your taskbar icons and make the taskbar clear?" } else { $false }
     $doTab    = Ask "Install Nightfall Tab (new tab page for Brave or Chrome)?"
     $doTheme  = Ask "Install Nightfall Theme (matching browser colors)?"
     $doArrows = Ask "Remove shortcut arrows from desktop icons? (asks for admin)" $false
@@ -71,11 +76,18 @@
         if ($doClock) {
             Say "`nMoon Clock" Cyan
             Copy-Folder (Join-Path $src 'moon-clock') $Targets.MoonClock
+            $settingsDir = Join-Path $env:APPDATA 'NightfallMoonClock'
+            $settingsFile = Join-Path $settingsDir 'settings.ini'
+            if (-not $doTaskbar -and -not (Test-Path $settingsFile)) {
+                New-Item -ItemType Directory -Path $settingsDir -Force | Out-Null
+                Set-Content -Path $settingsFile -Value @('CenterTaskbar=false', 'TaskbarStyle=off', 'TaskbarMaximized=same') -Encoding ASCII
+            }
             Say "  Copied to $($Targets.MoonClock). Building (takes a few seconds)..." Gray
-            $build = Start-Process -FilePath (Join-Path $Targets.MoonClock 'build.bat') -WorkingDirectory $Targets.MoonClock -PassThru
-            $build.WaitForExit(120000) | Out-Null
+            $started = Get-Date
+            $proc = Start-Process -FilePath (Join-Path $Targets.MoonClock 'build.bat') -WorkingDirectory $Targets.MoonClock -PassThru
+            $proc.WaitForExit(120000) | Out-Null
             $exe = Join-Path $Targets.MoonClock 'MoonClock.exe'
-            if (Test-Path $exe) {
+            if ((Test-Path $exe) -and ((Get-Item $exe).LastWriteTime -ge $started.AddSeconds(-5))) {
                 Say "  Built and started. Look for the moon in your system tray." Green
                 if ($doStart) {
                     Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'NightfallMoonClock' -Value "`"$exe`""
@@ -115,6 +127,10 @@
     }
 
     Say "`nAll done! Enjoy the night sky." Magenta
-    if ($doClock) { Say "Tip: right-click the moon in your system tray for settings, or choose 'Show the night sky now'." DarkGray }
+    if ($doClock) {
+        Say "Tip: right-click the moon in your system tray for settings, or choose 'Show the night sky now'." DarkGray
+        Say "Away mode starts on: icons hide after 3 idle minutes, the sky appears after 10, and your PC locks 20 minutes after that." DarkGray
+        Say "Change or turn any of these off in the tray menu > Away mode settings." DarkGray
+    }
     Say "To remove everything later:  irm https://raw.githubusercontent.com/$RepoName/$Branch/uninstall.ps1 | iex" DarkGray
 }

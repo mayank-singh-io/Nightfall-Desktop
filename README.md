@@ -2,6 +2,14 @@
 
 A calm, Mac-inspired night-sky setup for Windows 10: a desktop clock with tonight's real moon, a full-screen sky that appears when you step away, and a matching new tab page and browser theme. Everything is lightweight, needs nothing extra installed, and can be turned off or undone.
 
+**Quick install** (open PowerShell and paste):
+
+```powershell
+irm https://raw.githubusercontent.com/mayank-singh-io/Nightfall-Desktop/main/install.ps1 | iex
+```
+
+Or grab the zip from the [latest release](https://github.com/mayank-singh-io/Nightfall-Desktop/releases/latest). See [Install](#install) for all options, and the [changelog](CHANGELOG.md) for what's new.
+
 ![My desktop](screenshots/desktop.png)
 
 ## What's inside
@@ -35,7 +43,8 @@ When you're idle, your desktop icons hide first, then a full-screen night sky fa
 - **Live illustrated scenes:** choose River Night (rain, a shimmering river, a cabin window flickering like firelight), Galaxy Peaks, City Below (glimmering city lights), or Rain over the City, or get a different one each time
 
   ![Live scenes](screenshots/live-scenes.png)
-- A quiet shimmer at the top of each hour, 250 poetic lines that change every minute, and an optional lock after a while
+- A quiet shimmer at the top of each hour, and 250 poetic lines that change every minute
+- Locks your PC after the sky has been up for 20 minutes, for safety. Change the time or turn it off in Away mode settings.
 - Skips full-screen apps and games, and never locks while something is playing
 
 ### Nightfall Tab
@@ -56,6 +65,25 @@ Deep plum and lavender browser colors to match the new tab.
 
 ### Tweaks
 - Remove the shortcut arrows from desktop icons (with an undo)
+
+## Requirements
+
+- **Windows 10.** Everything works on any version; "what's playing" needs version 1809 or newer. Windows 11 isn't supported yet: its taskbar is built differently, so centering and transparency won't work there.
+- **.NET Framework 4**, which comes with Windows 10, so there's nothing to install.
+- **Brave, Chrome, Edge, or another Chromium browser** for the new tab page and theme.
+- **Internet** only for weather, sunrise times, fonts, and site icons. Everything else works offline.
+
+## What each part changes
+
+Nothing is changed silently, and everything can be undone.
+
+| Part | What it changes |
+|---|---|
+| **Moon Clock** | Files in `C:\Moon Clock`. The installer asks before turning on the taskbar changes. Settings in `%APPDATA%\NightfallMoonClock\settings.ini`. If you turn on "Start with Windows," an entry named `NightfallMoonClock` in your startup apps. While it runs, it can hide your desktop icons when you're away, move your taskbar icons to the center, and change the taskbar's transparency. All of these go back to normal when you quit it. |
+| **Weather** (optional) | Your saved city's coordinates are sent to [Open-Meteo](https://open-meteo.com/) to get the weather and sunrise times. Nothing else leaves your PC. |
+| **Nightfall Tab** | Replaces your browser's new tab page. Your sites, notes, and settings are stored in the browser on your PC only. |
+| **Nightfall Theme** | Your browser's colors only. |
+| **Shortcut arrows** | One Windows setting (the `29` value under `Explorer\Shell Icons`). `restore-arrows.bat` removes it. |
 
 ## Install
 
@@ -88,7 +116,39 @@ irm https://raw.githubusercontent.com/mayank-singh-io/Nightfall-Desktop/main/uni
 
 If you used TaskbarX or TranslucentTB before, quit them first, since Moon Clock now does both jobs.
 
-## Keeping it backed up
+## Troubleshooting
+
+**The build window says "That version didn't build... Building without 'what's playing'."**
+Moon Clock still works, just without the song line. Open `build-log.txt` in the Moon Clock folder to see why, and [open an issue](https://github.com/mayank-singh-io/Nightfall-Desktop/issues) with its contents.
+
+**Windows SmartScreen or my antivirus warns about MoonClock.exe.**
+It's a brand-new program built on your own PC, so Windows hasn't seen it before. Click **More info → Run anyway**. You can read every line of its source in `moon-clock`.
+
+**"What's playing" doesn't show anything.**
+Check that **Show what's playing** is ticked in the tray menu, and that the music app shows up in Windows' own media controls (press a volume key and look for the song). Brave, Chrome, Spotify, and YouTube Music all do.
+
+**My desktop icons are gone.**
+Away mode hides them while you're idle, and they come back when you move the mouse. If they ever stay hidden (for example after a crash), quit and restart Moon Clock, or right-click the desktop → **View** → **Show desktop icons**.
+
+**The taskbar icons aren't centered, or the taskbar isn't clear.**
+Make sure TaskbarX and TranslucentTB are closed, since they fight over the taskbar. Then check **Center taskbar icons** and **Taskbar look** in the tray menu. These only work on Windows 10.
+
+**The settings window is too tall for my screen.**
+It scrolls, and the **Save** button is always at the bottom. You can also press **Enter** to save or **Esc** to cancel.
+
+**Desktop icons show black squares after removing shortcut arrows.**
+Restart your PC once. If they're still there, run `tweaks\restore-arrows.bat`.
+
+**The new tab page or theme won't load.**
+In `brave://extensions` (or `chrome://extensions`), turn on **Developer mode**, click **Load unpacked**, and pick the folder that contains `manifest.json`.
+
+**How much does it slow my PC down?**
+Very little. The clock uses about 20–40 MB of memory and almost no CPU. The away-mode sky uses a few percent of CPU while it's showing, and nothing when it isn't.
+
+**How do I remove everything?**
+Run the uninstall command under [Install](#install). It closes Moon Clock properly, removes it from startup, and asks before deleting each folder.
+
+## Backing up your own setup
 
 - **backup.bat** copies your current setup from your PC into this folder, then commits and pushes to GitHub if Git is set up. It never copies your personal settings (city, clock position, notes) or the compiled `.exe`.
 - **restore.bat** puts everything back onto a PC, asking before each part.
@@ -114,4 +174,12 @@ After that, running **backup.bat** uploads changes automatically.
 
 ## License
 
-Code is under the MIT License (see `LICENSE`). The moon image is NASA's, credited above.
+Nightfall Desktop is under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/) (see `LICENSE`).
+
+- **You can:** use it, install it, change it for yourself, and share it with others, for any noncommercial purpose.
+- **You can't:** sell it, include it in a paid product, or use it for commercial purposes.
+- **Always:** keep the copyright notice and the license with any copy you share.
+
+For commercial use, [open an issue](https://github.com/mayank-singh-io/Nightfall-Desktop/issues) to ask.
+
+The moon image is NASA's, credited above, and isn't covered by this license.

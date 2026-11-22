@@ -21,7 +21,14 @@
         Say "Closing Moon Clock..." Cyan
         & taskkill /im MoonClock.exe 2>&1 | Out-Null
         Start-Sleep -Seconds 2
-        Get-Process -Name 'MoonClock' -ErrorAction SilentlyContinue | Stop-Process -Force
+        $stuck = Get-Process -Name 'MoonClock' -ErrorAction SilentlyContinue
+        if ($stuck) {
+            $stuck | Stop-Process -Force
+            # it couldn't tidy up, so restart Explorer to bring back desktop icons and the normal taskbar
+            Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+            if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer }
+        }
     }
     Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'NightfallMoonClock' -ErrorAction SilentlyContinue
 
