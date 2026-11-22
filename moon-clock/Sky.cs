@@ -81,11 +81,26 @@ namespace NightfallMoonClock
             return NativeSky.FindWindowEx(defView, IntPtr.Zero, "SysListView32", null);
         }
 
+        // A small marker file says "Moon Clock hid the icons". If the app is force-closed or crashes
+        // before it can show them again, the next start (or the uninstaller) brings them back.
+        static string FlagPath { get { return Path.Combine(Settings.Folder, "icons-hidden.flag"); } }
+
+        static void SetFlag(bool on)
+        {
+            try
+            {
+                if (on) { Directory.CreateDirectory(Settings.Folder); File.WriteAllText(FlagPath, "1"); }
+                else if (File.Exists(FlagPath)) File.Delete(FlagPath);
+            }
+            catch { }
+        }
+
         public static void Hide()
         {
             if (hiddenList != IntPtr.Zero) return;
             IntPtr list = FindList();
             if (list == IntPtr.Zero || !NativeSky.IsWindowVisible(list)) return;
+            SetFlag(true);
             NativeSky.ShowWindow(list, 0);
             hiddenList = list;
         }
@@ -97,10 +112,34 @@ namespace NightfallMoonClock
             IntPtr fresh = FindList();                  // in case Explorer restarted
             if (fresh != IntPtr.Zero && fresh != hiddenList) NativeSky.ShowWindow(fresh, 5);
             hiddenList = IntPtr.Zero;
+            SetFlag(false);
+        }
+
+        public static void RecoverAfterCrash()
+        {
+            try
+            {
+                if (!File.Exists(FlagPath)) return;
+                IntPtr list = FindList();
+                if (list != IntPtr.Zero) NativeSky.ShowWindow(list, 5);
+            }
+            catch { }
+            SetFlag(false);
         }
     }
 
     // ---------------------------------------------------------------- weather
+    // WebClient waits up to 100 seconds by default; give up sooner on a bad connection.
+    class QuickWebClient : WebClient
+    {
+        protected override WebRequest GetWebRequest(Uri address)
+        {
+            WebRequest request = base.GetWebRequest(address);
+            if (request != null) request.Timeout = 15000;
+            return request;
+        }
+    }
+
     static class WeatherService
     {
         static int code = -1;
@@ -132,8 +171,8 @@ namespace NightfallMoonClock
 
         static string Download(string url)
         {
-            ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072; // TLS 1.2
-            using (WebClient wc = new WebClient())
+            ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072; // make sure TLS 1.2 is allowed
+            using (WebClient wc = new QuickWebClient())
             {
                 wc.Encoding = Encoding.UTF8;
                 wc.Headers.Add("User-Agent", "NightfallMoonClock");
@@ -228,73 +267,15 @@ namespace NightfallMoonClock
         }
     }
 
-    // ---------------------------------------------------------------- live illustrated scenes
-    class SceneData
-    {
-        public Bitmap Background;
-        public string Rain = "none";
-        public List<float[]> Stars = new List<float[]>(), Lights = new List<float[]>(), Shimmers = new List<float[]>(), Ripples = new List<float[]>();
-        public List<PointF> Skyline = new List<PointF>();
-        public RectangleF Window = RectangleF.Empty;
-
-        public static readonly string[] Keys = { "river", "galaxy", "city", "raincity" };
-
-        public static SceneData Load(string key)
-        {
-            try
-            {
-                string dir = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "scenes");
-                string png = Path.Combine(dir, key + ".png"), txt = Path.Combine(dir, key + ".txt");
-                if (!File.Exists(png) || !File.Exists(txt)) return null;
-                SceneData d = new SceneData();
-                using (Image img = Image.FromFile(png)) d.Background = new Bitmap(img);
-                foreach (string raw in File.ReadAllLines(txt))
-                {
-                    string[] p = raw.Trim().Split(' ');
-                    if (p.Length == 0 || p[0].Length == 0) continue;
-                    switch (p[0])
-                    {
-                        case "rain": d.Rain = p[1]; break;
-                        case "star": d.Stars.Add(Nums(p)); break;
-                        case "light": d.Lights.Add(Nums(p)); break;
-                        case "shimmer": d.Shimmers.Add(Nums(p)); break;
-                        case "ripple": d.Ripples.Add(Nums(p)); break;
-                        case "window": { float[] n = Nums(p); d.Window = new RectangleF(n[0], n[1], n[2], n[3]); break; }
-                        case "skyline":
-                            for (int i = 1; i < p.Length; i++)
-                            {
-                                string[] xy = p[i].Split(',');
-                                d.Skyline.Add(new PointF(float.Parse(xy[0], CultureInfo.InvariantCulture), float.Parse(xy[1], CultureInfo.InvariantCulture)));
-                            }
-                            break;
-                    }
-                }
-                return d;
-            }
-            catch { return null; }
-        }
-
-        static float[] Nums(string[] p)
-        {
-            float[] n = new float[p.Length - 1];
-            for (int i = 1; i < p.Length; i++) n[i - 1] = float.Parse(p[i], CultureInfo.InvariantCulture);
-            return n;
-        }
-    }
-
     // ---------------------------------------------------------------- sky manager
     static class SkyManager
     {
         static List<SkyForm> forms = new List<SkyForm>();
         public static bool Active { get { return forms.Count > 0; } }
 
-        public static string SceneKey = "sky";
-        static readonly Random pick = new Random();
-
         public static void Start(Settings s)
         {
             if (Active) return;
-            SceneKey = s.Scene == "rotate" ? SceneData.Keys[pick.Next(SceneData.Keys.Length)] : s.Scene;
             uint startTick = NativeSky.LastInputTick();
             foreach (Screen sc in Screen.AllScreens)
             {
@@ -505,11 +486,6 @@ namespace NightfallMoonClock
         double activeStart, nextConstellation;
         int lastShape = -1;
         int lastHour = -1;
-        SceneData scene;
-        float sceneScale = 1, sceneOx, sceneOy;
-        GraphicsPath skyClip;
-        float[] lightPhase;
-        int rainDiv = 9000;
         Font labelFont;
         readonly SolidBrush twinkleBrush = new SolidBrush(Color.White);
         double shimmerStart = -999999;
@@ -545,13 +521,8 @@ namespace NightfallMoonClock
 
             weather = WeatherService.Kind(s);
             phase = CurrentPhase();
-            if (SkyManager.SceneKey != "sky") scene = SceneData.Load(SkyManager.SceneKey);
-            if (scene != null) BuildScene();
-            else
-            {
-                BuildBackground();
-                BuildExtras();
-            }
+            BuildBackground();
+            BuildExtras();
             BuildWeather();
             nextShot = 4000 + rng.Next(6000);
             nextShower = 60000 + rng.Next(60000);
@@ -684,114 +655,6 @@ namespace NightfallMoonClock
             if (x + layer.Width < g.VisibleClipBounds.Right + 1) g.DrawImageUnscaled(layer, x + layer.Width, y);
         }
 
-        PointF Map(float x, float y) { return new PointF(sceneOx + x * sceneScale, sceneOy + y * sceneScale); }
-
-        // an illustrated scene: a still painting with stars, lights, water and rain animated on top
-        void BuildScene()
-        {
-            int w = Width, h = Height;
-            sceneScale = Math.Max(w / (float)scene.Background.Width, h / (float)scene.Background.Height);   // fill the screen
-            sceneOx = (w - scene.Background.Width * sceneScale) / 2;
-            sceneOy = (h - scene.Background.Height * sceneScale) / 2;
-            background = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
-            using (Graphics g = Graphics.FromImage(background))
-            {
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.DrawImage(scene.Background, sceneOx, sceneOy, scene.Background.Width * sceneScale, scene.Background.Height * sceneScale);
-            }
-            Random r = new Random(5);
-            twinklers.Clear();
-            foreach (float[] st in scene.Stars)
-            {
-                PointF p = Map(st[0], st[1]);
-                Star t = new Star();
-                t.x = p.X; t.y = p.Y; t.r = st[2] * scale;
-                t.phase = (float)(r.NextDouble() * Math.PI * 2);
-                t.speed = 0.6f + (float)r.NextDouble() * 1.2f;
-                twinklers.Add(t);
-            }
-            lightPhase = new float[scene.Lights.Count + scene.Shimmers.Count + scene.Ripples.Count + 1];
-            for (int i = 0; i < lightPhase.Length; i++) lightPhase[i] = (float)(r.NextDouble() * Math.PI * 2);
-
-            // shooting stars and meteors are clipped to the sky, so they never cross the mountains
-            skyClip = new GraphicsPath();
-            List<PointF> pts = new List<PointF>();
-            pts.Add(new PointF(0, 0));
-            foreach (PointF sp in scene.Skyline) pts.Add(Map(sp.X, sp.Y));
-            pts.Add(new PointF(w, pts[pts.Count - 1].Y));
-            pts.Add(new PointF(w, 0));
-            skyClip.AddPolygon(pts.ToArray());
-
-            weather = scene.Rain == "none" ? "clear" : "rain";
-            rainDiv = scene.Rain == "heavy" ? 6000 : 12000;
-            BuildWeather();
-            dimAlpha = 0;
-        }
-
-        void DrawSceneLife(Graphics g, double t)
-        {
-            int k = 0;
-            // city lights that gently flicker and glimmer
-            using (SolidBrush b = new SolidBrush(Color.White))
-            {
-                foreach (float[] L in scene.Lights)
-                {
-                    float ph = lightPhase[k++];
-                    double f = 0.5 + 0.5 * Math.Sin(t / (700 + (ph * 90)) + ph);
-                    PointF p = Map(L[0], L[1]);
-                    float rr = Math.Max(1f, L[2] * sceneScale) * (1.2f + (float)f);
-                    b.Color = Color.FromArgb((int)(40 * f), (int)L[3], (int)L[4], (int)L[5]);
-                    g.FillEllipse(b, p.X - rr * 3, p.Y - rr * 3, rr * 6, rr * 6);
-                    b.Color = Color.FromArgb((int)(120 + 135 * f), (int)L[3], (int)L[4], (int)L[5]);
-                    g.FillEllipse(b, p.X - rr * 0.6f, p.Y - rr * 0.6f, rr * 1.2f, rr * 1.2f);
-                }
-            }
-            // moonlight glinting on the river
-            using (Pen pen = new Pen(Color.White, Math.Max(1f, sceneScale)))
-            {
-                foreach (float[] S in scene.Shimmers)
-                {
-                    float ph = lightPhase[k++];
-                    double f = Math.Pow(Math.Max(0, Math.Sin(t / 650 + ph)), 3);
-                    if (f < 0.03) continue;
-                    PointF a = Map(S[0], S[2]), c = Map(S[1], S[2]);
-                    float drift = (float)Math.Sin(t / 1300 + ph) * 6 * sceneScale;
-                    pen.Color = Color.FromArgb((int)(110 * f), 232, 222, 245);
-                    g.DrawLine(pen, a.X + drift, a.Y, c.X + drift, c.Y);
-                }
-                // city reflections rippling on the water
-                foreach (float[] R in scene.Ripples)
-                {
-                    float ph = lightPhase[k++];
-                    double f = 0.5 + 0.5 * Math.Sin(t / 520 + ph);
-                    PointF a = Map(R[0], R[1]);
-                    float wob = (float)Math.Sin(t / 380 + ph * 2) * 2.5f * sceneScale;
-                    pen.Color = Color.FromArgb((int)(25 + 60 * f), (int)R[3], (int)R[4], (int)R[5]);
-                    g.DrawLine(pen, a.X + wob, a.Y, a.X - wob, a.Y + R[2] * sceneScale);
-                }
-            }
-            // the cabin window, flickering like firelight
-            if (!scene.Window.IsEmpty)
-            {
-                float ph = lightPhase[k];
-                double f = 0.6 + 0.25 * Math.Sin(t / 230 + ph) + 0.15 * Math.Sin(t / 97 + ph * 3);
-                PointF p = Map(scene.Window.X, scene.Window.Y);
-                float ww = scene.Window.Width * sceneScale, hh = scene.Window.Height * sceneScale;
-                using (GraphicsPath gp = new GraphicsPath())
-                {
-                    gp.AddEllipse(p.X - ww * 2.5f, p.Y - hh * 2.5f, ww * 6, hh * 6);
-                    using (PathGradientBrush pb = new PathGradientBrush(gp))
-                    {
-                        pb.CenterColor = Color.FromArgb((int)(70 * f), 255, 170, 90);
-                        pb.SurroundColors = new Color[] { Color.FromArgb(0, 255, 170, 90) };
-                        g.FillPath(pb, gp);
-                    }
-                }
-                using (SolidBrush wb = new SolidBrush(Color.FromArgb((int)(150 + 105 * Math.Min(1, f)), 255, 196, 115)))
-                    g.FillRectangle(wb, p.X, p.Y, ww, hh);
-            }
-        }
-
         void BuildExtras()
         {
             if (clouds != null) { clouds.Dispose(); clouds = null; }
@@ -879,7 +742,7 @@ namespace NightfallMoonClock
             float area = Width * Height;
             if (weather == "rain" || weather == "storm")
             {
-                int n = (int)(area / (weather == "storm" ? 5500f : (float)rainDiv));
+                int n = (int)(area / (weather == "storm" ? 5500f : 9000f));
                 for (int i = 0; i < n; i++)
                 {
                     Drop d = new Drop();
@@ -1030,14 +893,14 @@ namespace NightfallMoonClock
                 currentMinute = minute;
                 if (IsPrimary) BuildTextLayer();
                 string p = CurrentPhase();
-                if (p != phase && scene == null) { phase = p; BuildBackground(); BuildExtras(); }
+                if (p != phase) { phase = p; BuildBackground(); BuildExtras(); }
             }
-            if (IsPrimary && !lockedPc && settings.LockAfter > 0 && t > settings.LockAfter * 60000.0 && NowPlaying.Last == null)
+            if (IsPrimary && !lockedPc && settings.ShouldLock && t > settings.LockAfter * 60000.0 && NowPlaying.Last == null)
             {
                 lockedPc = true;
                 NativeSky.LockWorkStation();
             }
-            if (settings.SkyParallax && scene == null)
+            if (settings.SkyParallax)
             {
                 starOffset = (starOffset + (float)dt * 2.2f * scale) % Width;
                 float[] speeds = { 4f, 7f, 11f };
@@ -1050,7 +913,7 @@ namespace NightfallMoonClock
             {
                 string song = settings.SkyPlaying ? NowPlaying.Last : null;
                 if (song != shownSong) { shownSong = song; BuildTextLayer(); }
-                if (settings.SkyConstellations && scene == null) UpdateConstellation(t);
+                if (settings.SkyConstellations) UpdateConstellation(t);
             }
             if (clouds != null) cloudOffset = (cloudOffset + (float)dt * 9 * scale) % clouds.Width;
             if (aurora != null) auroraOffset = (auroraOffset + (float)dt * 6 * scale) % aurora.Width;
@@ -1060,7 +923,7 @@ namespace NightfallMoonClock
             if (settings.SkyShooting && t > nextShot)
             {
                 Streak s = new Streak();
-                s.x = Width * (0.35f + (float)rng.NextDouble() * 0.6f); s.y = Height * (0.05f + (float)rng.NextDouble() * (scene != null ? 0.12f : 0.25f));
+                s.x = Width * (0.35f + (float)rng.NextDouble() * 0.6f); s.y = Height * (0.05f + (float)rng.NextDouble() * 0.25f);
                 s.vx = -(260 + (float)rng.NextDouble() * 160) * scale; s.vy = (110 + (float)rng.NextDouble() * 60) * scale;
                 s.tail = 0.25f; s.width = 1.6f; s.start = t; s.duration = 900;
                 streaks.Add(s);
@@ -1237,7 +1100,6 @@ namespace NightfallMoonClock
             g.CompositingQuality = CompositingQuality.HighSpeed;
             g.InterpolationMode = InterpolationMode.NearestNeighbor;
             g.DrawImageUnscaled(background, 0, 0);
-            if (scene != null) { PaintScene(g, t); return; }
             float starDim = (weather == "rain" || weather == "storm" ? 0.35f : weather == "fog" ? 0.55f : weather == "snow" ? 0.65f : 1f) * Palettes[phase].Stars;
             if (starLayer != null) DrawTiled(g, starLayer, starOffset, 0);
             g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -1268,13 +1130,6 @@ namespace NightfallMoonClock
             for (int i = 0; i < 3; i++) if (ridgeLayers[i] != null) DrawTiled(g, ridgeLayers[i], ridgeOffsets[i], ridgeTop);
             if (dimAlpha > 0) using (SolidBrush d = new SolidBrush(Color.FromArgb(dimAlpha, 13, 7, 17))) g.FillRectangle(d, 0, 0, Width, Height);
 
-            DrawStreaks(g, t);
-            DrawWeatherLayer(g);
-            DrawTextLayers(g, t);
-        }
-
-        void DrawStreaks(Graphics g, double t)
-        {
             for (int i = streaks.Count - 1; i >= 0; i--)
             {
                 Streak s = streaks[i];
@@ -1289,10 +1144,7 @@ namespace NightfallMoonClock
                 using (Pen p = new Pen(lb, s.width * scale))
                     g.DrawLine(p, hx, hy, tx, ty);
             }
-        }
 
-        void DrawWeatherLayer(Graphics g)
-        {
             if (weather == "rain" || weather == "storm")
             {
                 using (Pen p = new Pen(Color.FromArgb(80, 205, 198, 228), 1))
@@ -1311,10 +1163,7 @@ namespace NightfallMoonClock
                 g.DrawImageUnscaled(fog, (int)-fogOffset, (int)(Height * 0.45f));
                 g.DrawImageUnscaled(fog, (int)(-fog.Width / 3f + fogOffset * 0.6f), (int)(Height * 0.45f + 30 * scale));
             }
-        }
 
-        void DrawTextLayers(Graphics g, double t)
-        {
             if (IsPrimary && textLayer != null) g.DrawImageUnscaled(textLayer, 0, 0);
             if (IsPrimary && thoughtLayer != null)
             {
@@ -1332,26 +1181,6 @@ namespace NightfallMoonClock
                     }
                 }
             }
-        }
-
-        void PaintScene(Graphics g, double t)
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            Region old = g.Clip;
-            g.SetClip(skyClip, CombineMode.Intersect);
-            double since = t - shimmerStart;
-            foreach (Star s in twinklers)
-            {
-                double boost = since >= 0 && since < 7000 ? Math.Sin(Math.PI * since / 7000) * (0.5 + 0.5 * Math.Sin(t / 160 + s.phase * 3)) : 0;
-                int a = (int)(255 * Math.Min(1, 0.55 + 0.45 * Math.Sin(t / 1000 * s.speed + s.phase) + boost * 0.6));
-                twinkleBrush.Color = Color.FromArgb(Math.Max(0, Math.Min(255, a)), 236, 228, 244);
-                g.FillEllipse(twinkleBrush, s.x - s.r, s.y - s.r, s.r * 2, s.r * 2);
-            }
-            DrawStreaks(g, t);
-            g.Clip = old;
-            DrawSceneLife(g, t);
-            DrawWeatherLayer(g);
-            DrawTextLayers(g, t);
         }
 
         protected override void OnPaintBackground(PaintEventArgs e) { }
@@ -1373,8 +1202,6 @@ namespace NightfallMoonClock
             if (clouds != null) clouds.Dispose();
             if (aurora != null) aurora.Dispose();
             if (labelFont != null) labelFont.Dispose();
-            if (skyClip != null) skyClip.Dispose();
-            if (scene != null && scene.Background != null) scene.Background.Dispose();
             twinkleBrush.Dispose();
             base.OnFormClosed(e);
             SkyManager.Closed(this);
@@ -1388,8 +1215,9 @@ namespace NightfallMoonClock
         readonly Action onChange;
         NumericUpDown iconsMin, skyMin;
         CheckBox shooting, showers, moon, clockBox, thoughts, pauseMedia, playingBox, parallaxBox, constBox, hourlyBox;
-        ComboBox weatherBox, colorsBox, extrasBox, moonBox, sceneBox;
+        ComboBox weatherBox, colorsBox, extrasBox, moonBox;
         NumericUpDown lockMin;
+        CheckBox lockBox;
         TextBox cityBox;
         Label status;
 
@@ -1425,14 +1253,16 @@ namespace NightfallMoonClock
             col.Controls.Add(Hint("Set either one to 0 to turn it off. Moving the mouse or pressing a key brings everything back."));
             pauseMedia = Check("Don't show the sky while music or video is playing", s.PauseForMedia);
             col.Controls.Add(pauseMedia);
+            lockBox = Check("Lock my PC while I'm away", s.LockEnabled);
+            col.Controls.Add(lockBox);
             lockMin = Number(s.LockAfter);
-            col.Controls.Add(Row("Lock my PC after the sky has shown for", lockMin, "minutes"));
+            lockMin.Minimum = 1;
+            lockMin.Enabled = s.LockEnabled;
+            lockBox.CheckedChanged += delegate { lockMin.Enabled = lockBox.Checked; };
+            col.Controls.Add(Row("    after the sky has shown for", lockMin, "minutes"));
+            col.Controls.Add(Hint("It never locks while music or video is playing."));
 
             col.Controls.Add(Heading("Look"));
-            sceneBox = Combo(new string[] { "Nightfall sky (classic)", "River Night", "Galaxy Peaks", "City Below", "Rain over the City", "A different scene each time" },
-                             new string[] { "sky", "river", "galaxy", "city", "raincity", "rotate" }, s.Scene);
-            col.Controls.Add(Row("Scene", sceneBox, ""));
-            col.Controls.Add(Hint("Illustrated scenes have their own moon and weather, so the options below apply to the classic sky."));
             colorsBox = Combo(new string[] { "Always night (classic)", "Follow the time of day" }, new string[] { "night", "auto" }, s.SkyColors);
             col.Controls.Add(Row("Sky colors", colorsBox, ""));
             extrasBox = Combo(new string[] { "Nothing extra (classic)", "Drifting clouds", "Soft aurora", "Clouds and aurora" }, new string[] { "none", "clouds", "aurora", "both" }, s.SkyExtras);
@@ -1486,26 +1316,42 @@ namespace NightfallMoonClock
             AcceptButton = save;
         }
 
+        bool lookingUp;
+
+        // The lookup runs in the background, so the window stays responsive on a slow connection.
         void FindCity()
         {
             string name = cityBox.Text.Trim();
             if (name.Length == 0) { status.Text = "Enter a city name first."; cityBox.Focus(); return; }
+            if (lookingUp) return;
+            lookingUp = true;
             status.Text = "Looking up your city...";
-            try
+            ThreadPool.QueueUserWorkItem(delegate
             {
-                string display; double lat, lon;
-                if (WeatherService.FindCity(name, out display, out lat, out lon))
+                string display = null; double lat = double.NaN, lon = double.NaN;
+                bool found = false, failed = false;
+                try { found = WeatherService.FindCity(name, out display, out lat, out lon); }
+                catch { failed = true; }
+                try
                 {
-                    settings.City = display; settings.Lat = lat; settings.Lon = lon;
-                    cityBox.Text = display;
-                    settings.Save();
-                    WeatherService.Refresh(settings, true);
-                    status.Text = "Saved. Weather will match " + display + ".";
+                    BeginInvoke(new MethodInvoker(delegate
+                    {
+                        lookingUp = false;
+                        if (failed) { status.Text = "Couldn't reach the weather service. Check your connection and try again."; return; }
+                        if (!found) { status.Text = "Couldn't find \"" + name + "\". Try a nearby larger city."; return; }
+                        settings.City = display; settings.Lat = lat; settings.Lon = lon;
+                        cityBox.Text = display;
+                        settings.Save();
+                        WeatherService.Refresh(settings, true);
+                        status.Text = "Saved. Weather will match " + display + ".";
+                    }));
                 }
-                else status.Text = "Couldn't find \"" + name + "\". Try a nearby larger city.";
-            }
-            catch { status.Text = "Couldn't reach the weather service. Check your connection and try again."; }
+                catch { }   // the window was closed while looking up
+            });
         }
+
+        // called when locking is switched from the tray menu while this window is open
+        public void SyncLock() { lockBox.Checked = settings.LockEnabled; }
 
         void Apply()
         {
@@ -1522,8 +1368,8 @@ namespace NightfallMoonClock
             settings.SkyColors = (string)((object[])colorsBox.Tag)[colorsBox.SelectedIndex];
             settings.SkyExtras = (string)((object[])extrasBox.Tag)[extrasBox.SelectedIndex];
             settings.MoonStyle = (string)((object[])moonBox.Tag)[moonBox.SelectedIndex];
-            settings.Scene = (string)((object[])sceneBox.Tag)[sceneBox.SelectedIndex];
             settings.LockAfter = (int)lockMin.Value;
+            settings.LockEnabled = lockBox.Checked;
             settings.SkyPlaying = playingBox.Checked;
             settings.SkyParallax = parallaxBox.Checked;
             settings.SkyConstellations = constBox.Checked;

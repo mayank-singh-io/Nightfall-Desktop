@@ -27,6 +27,24 @@ namespace NightfallMoonClock
         static int busy;
         static volatile bool enabled;
 
+        // Windows 11 has a new taskbar that centers icons on its own and can't be moved this way.
+        public static bool Supported
+        {
+            get
+            {
+                try
+                {
+                    using (Microsoft.Win32.RegistryKey key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+                    {
+                        int build;
+                        if (key != null && int.TryParse(key.GetValue("CurrentBuildNumber") as string, out build)) return build < 22000;
+                    }
+                }
+                catch { }
+                return true;
+            }
+        }
+
         public static void SetEnabled(bool on)
         {
             enabled = on;
@@ -158,6 +176,7 @@ namespace NightfallMoonClock
 
         static Timer timer;
         static volatile string style = "off", maximizedStyle = "same";
+        static volatile bool active;
         static int busy;
         static readonly Dictionary<IntPtr, string> lastLook = new Dictionary<IntPtr, string>();
 
@@ -166,15 +185,20 @@ namespace NightfallMoonClock
             style = normal;
             maximizedStyle = whenMaximized;
             bool on = normal != "off" || whenMaximized != "same";
+            active = on;
             if (on && timer == null) timer = new Timer(delegate { Tick(); }, null, 0, 120);
-            if (!on && timer != null) { timer.Dispose(); timer = null; RestoreAll(); }
-            if (normal == "off" && whenMaximized == "same") RestoreAll();
+            if (!on) Stop();
         }
 
         public static void Stop()
         {
+            active = false;
             if (timer != null) { timer.Dispose(); timer = null; }
-            RestoreAll();
+            // A tick may already be running on another thread; wait for it, or it could
+            // re-apply the look after we reset it and leave the taskbar see-through.
+            for (int i = 0; i < 50 && Interlocked.CompareExchange(ref busy, 1, 0) == 1; i++) Thread.Sleep(20);
+            try { RestoreAll(); }
+            finally { Interlocked.Exchange(ref busy, 0); }
         }
 
         static List<IntPtr> Taskbars()
@@ -236,6 +260,7 @@ namespace NightfallMoonClock
             if (Interlocked.Exchange(ref busy, 1) == 1) return;
             try
             {
+                if (!active) return;
                 HashSet<IntPtr> maxed = maximizedStyle != "same" ? MaximizedMonitors() : null;
                 lock (lastLook)
                 foreach (IntPtr bar in Taskbars())

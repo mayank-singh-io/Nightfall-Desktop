@@ -1,23 +1,23 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 cd /d "%~dp0"
+
+rem  build.bat          build, then start Moon Clock
+rem  build.bat --check  only build (used by the GitHub check; never closes or starts anything)
+set "CHECK="
+if /i "%~1"=="--check" set "CHECK=1"
 
 set "FW=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319"
 if not exist "%FW%\csc.exe" set "FW=%WINDIR%\Microsoft.NET\Framework\v4.0.30319"
 if not exist "%FW%\csc.exe" (
-  echo Couldn't find the C# compiler that comes with Windows.
-  pause
+  echo Couldn't find the C# compiler that comes with Windows ^(.NET Framework 4^).
+  if not defined CHECK pause
   exit /b 1
 )
 set "CSC=%FW%\csc.exe"
 set "REFS=/r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Core.dll /lib:"%FW%\WPF" /r:UIAutomationClient.dll /r:UIAutomationTypes.dll /r:WindowsBase.dll"
 
-rem Windows Runtime references, needed for "what's playing"
-set "WINRT="
-for %%f in ("%WINDIR%\System32\WinMetadata\*.winmd") do set "WINRT=!WINRT! /r:"%%f""
-for %%d in (System.Runtime.dll System.Runtime.WindowsRuntime.dll System.Runtime.InteropServices.WindowsRuntime.dll System.Threading.Tasks.dll) do (
-  if exist "%FW%\%%d" set "WINRT=!WINRT! /r:"%FW%\%%d""
-)
+if defined CHECK goto build
 
 rem Ask the running clock to close so it can restore icons and the taskbar, then force it if needed
 tasklist /fi "imagename eq MoonClock.exe" | find /i "MoonClock.exe" >nul && (
@@ -26,19 +26,25 @@ tasklist /fi "imagename eq MoonClock.exe" | find /i "MoonClock.exe" >nul && (
   taskkill /im MoonClock.exe /f >nul 2>&1
 )
 
-echo Building Moon Clock with "what's playing"...
-"%CSC%" /nologo /target:winexe /optimize+ /define:MEDIA /win32icon:moon.ico /out:MoonClock.exe %REFS% !WINRT! MoonClock.cs Sky.cs Taskbar.cs
+:build
+rem Remove the old copy first, so a failed build can never look like a successful one
+if exist MoonClock.exe del /q MoonClock.exe >nul 2>&1
+if exist MoonClock.exe (
+  echo MoonClock.exe is still running or locked. Quit it from the tray and try again.
+  if not defined CHECK pause
+  exit /b 1
+)
+echo Building Moon Clock...
+rem "What's playing" is read from Windows at run time, so there's only one build and it always includes it.
+"%CSC%" /nologo /target:winexe /optimize+ /win32icon:moon.ico /out:MoonClock.exe %REFS% MoonClock.cs Sky.cs Taskbar.cs
 if errorlevel 1 (
   echo.
-  echo That version didn't build on this PC. Building without "what's playing" instead...
-  "%CSC%" /nologo /target:winexe /optimize+ /win32icon:moon.ico /out:MoonClock.exe %REFS% MoonClock.cs Sky.cs Taskbar.cs
-  if errorlevel 1 (
-    echo.
-    echo The build failed. Take a screenshot of this window and send it to Claude.
-    pause
-    exit /b 1
-  )
+  echo The build failed. The error is shown above. Please open an issue with a screenshot:
+  echo https://github.com/mayank-singh-io/Nightfall-Desktop/issues
+  if not defined CHECK pause
+  exit /b 1
 )
+if defined CHECK exit /b 0
 
 echo.
 echo Done! Starting Moon Clock...
