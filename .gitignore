@@ -1,0 +1,11 @@
+# built files
+*.exe
+*.pdb
+
+# personal data that should never be public
+settings.ini
+icon-backup*.json
+sound-backup*.json
+
+# icons stay on your PC only
+icons/
