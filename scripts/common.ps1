@@ -2,14 +2,10 @@
 $Repo = Split-Path $PSScriptRoot -Parent
 
 $Live = @{
-    Icons     = 'C:\Icons'
     MoonClock = 'C:\Moon Clock'
     Tab       = 'C:\Nightfall Tab'
     Theme     = 'C:\Nightfall Theme'
 }
-
-# Icons made by other designers (versions of company logos). They stay on your PC and never go public.
-$PrivateIcons = @('firefox', 'brave', 'vscode', 'termius', 'ollama')
 
 # Finds the real folder even if a zip was extracted into a subfolder, e.g. C:\Nightfall Tab\nightfall-tab
 function Find-Folder([string]$root, [string]$marker) {

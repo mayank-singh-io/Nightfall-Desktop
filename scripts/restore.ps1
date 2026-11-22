@@ -8,15 +8,6 @@ function Ask([string]$q) {
 
 Say "Restoring your Nightfall setup from:`n  $Repo`n" Cyan
 
-if (Ask "Restore icons to $($Live.Icons)?") {
-    New-Item -ItemType Directory -Path $Live.Icons -Force | Out-Null
-    Copy-Tree (Join-Path $Repo 'icons\icons') $Live.Icons @('*.ico') | Out-Null     # merges, so your private icons stay
-    Copy-Tree (Join-Path $Repo 'icons\tiles') (Join-Path $Live.Icons 'tiles') @('*.png') | Out-Null
-    Copy-Tree (Join-Path $Repo 'icons') $Live.Icons @('apply-icons.ps1', 'apply-icons.bat', 'undo-icons.bat') | Out-Null
-    Say "  Icons copied." Green
-    if (Ask "  Apply them to your shortcuts and folders now?") { Start-Process (Join-Path $Live.Icons 'apply-icons.bat') -Wait }
-}
-
 if (Ask "Restore and build Moon Clock in $($Live.MoonClock)?") {
     $dest = Find-Folder $Live.MoonClock 'MoonClock.cs'
     if (-not $dest) { $dest = $Live.MoonClock }

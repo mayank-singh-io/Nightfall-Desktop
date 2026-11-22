@@ -2,25 +2,17 @@
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 Say "Backing up your Nightfall setup into:`n  $Repo`n" Cyan
-$private = @()
-foreach ($n in $PrivateIcons) { $private += "$n.ico"; $private += "$n-150.png"; $private += "$n-70.png" }
-
 function Report([string]$name, [bool]$ok) {
     if ($ok) { Say "  ${name}: updated" Green } else { Say "  ${name}: problem copying" Yellow }
 }
 
-# Icons (your original set only)
-if (Test-Path -LiteralPath $Live.Icons) {
-    $ok = Copy-Tree $Live.Icons (Join-Path $Repo 'icons\icons') @('*.ico') $private
-    $tiles = Join-Path $Live.Icons 'tiles'
-    if (Test-Path -LiteralPath $tiles) { $ok = (Copy-Tree $tiles (Join-Path $Repo 'icons\tiles') @('*.png') $private) -and $ok }
-    Report 'Icons' $ok
-} else { Say "  Icons: not found at $($Live.Icons), skipped" Yellow }
-
 # Moon Clock source (never the .exe or your personal settings)
 $mc = Find-Folder $Live.MoonClock 'MoonClock.cs'
 if ($mc) {
-    Report 'Moon Clock' (Copy-Tree $mc (Join-Path $Repo 'moon-clock') @('*.cs', 'build.bat', 'moon.ico', 'moon.png', 'thoughts.txt', 'CREDITS.txt'))
+    $ok = Copy-Tree $mc (Join-Path $Repo 'moon-clock') @('*.cs', 'build.bat', 'moon.ico', 'moon.png', 'thoughts.txt', 'CREDITS.txt')
+    $scenes = Join-Path $mc 'scenes'
+    if (Test-Path -LiteralPath $scenes) { $ok = (Copy-Tree $scenes (Join-Path $Repo 'moon-clock\scenes') @('*.png', '*.txt')) -and $ok }
+    Report 'Moon Clock' $ok
 } else { Say "  Moon Clock: not found under $($Live.MoonClock), skipped" Yellow }
 
 # Browser extensions
