@@ -56,6 +56,7 @@ namespace NightfallMoonClock
         public string Weather = "auto";
         public string SkyColors = "night", SkyExtras = "none", MoonStyle = "large";
         public int LockAfter = 20;
+        public string Scene = "sky";
         public bool SkyPlaying = true, SkyParallax = true, SkyConstellations = true, SkyHourly = true;
         public bool ShowTonight = true;
         public bool AlignRight = true;
@@ -103,6 +104,7 @@ namespace NightfallMoonClock
                 s.Weather = S(d, "Weather", s.Weather); s.City = S(d, "City", "");
                 s.SkyColors = S(d, "SkyColors", s.SkyColors); s.SkyExtras = S(d, "SkyExtras", s.SkyExtras); s.MoonStyle = d.ContainsKey("RealMoon") ? S(d, "MoonStyle", s.MoonStyle) : "large";   // switch everyone to the real moon once
                 s.LockAfter = I(d, "LockAfter", s.LockAfter);
+                s.Scene = S(d, "Scene", s.Scene);
                 s.SkyPlaying = B(d, "SkyPlaying", s.SkyPlaying); s.SkyParallax = B(d, "SkyParallax", s.SkyParallax);
                 s.SkyConstellations = B(d, "SkyConstellations", s.SkyConstellations);
                 s.SkyHourly = B(d, "SkyHourly", s.SkyHourly); s.ShowTonight = B(d, "ShowTonight", s.ShowTonight);
@@ -131,7 +133,7 @@ namespace NightfallMoonClock
                     "SkyClock=" + Bool(SkyClock), "SkyThoughts=" + Bool(SkyThoughts),
                     "Weather=" + Weather, "City=" + City,
                     "SkyColors=" + SkyColors, "SkyExtras=" + SkyExtras, "MoonStyle=" + MoonStyle, "RealMoon=1", "LockAfter=" + LockAfter,
-                    "SkyPlaying=" + Bool(SkyPlaying), "SkyParallax=" + Bool(SkyParallax), "SkyConstellations=" + Bool(SkyConstellations), "SkyHourly=" + Bool(SkyHourly), "ShowTonight=" + Bool(ShowTonight),
+                    "Scene=" + Scene, "SkyPlaying=" + Bool(SkyPlaying), "SkyParallax=" + Bool(SkyParallax), "SkyConstellations=" + Bool(SkyConstellations), "SkyHourly=" + Bool(SkyHourly), "ShowTonight=" + Bool(ShowTonight),
                     "AlignRight=" + Bool(AlignRight), "CenterTaskbar=" + Bool(CenterTaskbar), "TaskbarStyle=" + TaskbarStyle, "TaskbarMaximized=" + TaskbarMaximized, "RightEdge=" + RightEdge,
                     "Lat=" + (double.IsNaN(Lat) ? "" : Lat.ToString(inv)), "Lon=" + (double.IsNaN(Lon) ? "" : Lon.ToString(inv))
                 });
