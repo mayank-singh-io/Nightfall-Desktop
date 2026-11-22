@@ -11,9 +11,10 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
-using System.Reflection;
-using System.Threading.Tasks;
 using Microsoft.Win32;
+#if MEDIA
+using Windows.Media.Control;
+#endif
 
 namespace NightfallMoonClock
 {
@@ -26,7 +27,6 @@ namespace NightfallMoonClock
             using (Mutex mutex = new Mutex(true, "NightfallMoonClock_SingleInstance", out isNew))
             {
                 if (!isNew) return;
-                DesktopIcons.RecoverAfterCrash();   // in case a previous run was force-closed while icons were hidden
                 Native.SetProcessDPIAware();
                 Application.EnableVisualStyles();
                 AppDomain.CurrentDomain.UnhandledException += delegate { DesktopIcons.Show(); };
@@ -56,8 +56,7 @@ namespace NightfallMoonClock
         public string Weather = "auto";
         public string SkyColors = "night", SkyExtras = "none", MoonStyle = "large";
         public int LockAfter = 20;
-        public bool LockEnabled = true;   // lock the PC once the away sky has shown for LockAfter minutes
-        public bool ShouldLock { get { return LockEnabled && LockAfter > 0; } }
+        public string Scene = "sky";
         public bool SkyPlaying = true, SkyParallax = true, SkyConstellations = true, SkyHourly = true;
         public bool ShowTonight = true;
         public bool AlignRight = true;
@@ -67,7 +66,7 @@ namespace NightfallMoonClock
         public string City = "";
         public double Lat = double.NaN, Lon = double.NaN;
 
-        public static string Folder
+        static string Folder
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "NightfallMoonClock"); }
         }
@@ -105,9 +104,7 @@ namespace NightfallMoonClock
                 s.Weather = S(d, "Weather", s.Weather); s.City = S(d, "City", "");
                 s.SkyColors = S(d, "SkyColors", s.SkyColors); s.SkyExtras = S(d, "SkyExtras", s.SkyExtras); s.MoonStyle = d.ContainsKey("RealMoon") ? S(d, "MoonStyle", s.MoonStyle) : "large";   // switch everyone to the real moon once
                 s.LockAfter = I(d, "LockAfter", s.LockAfter);
-                // older versions turned locking off by setting the minutes to 0
-                s.LockEnabled = d.ContainsKey("LockEnabled") ? B(d, "LockEnabled", true) : s.LockAfter > 0;
-                if (s.LockAfter <= 0) s.LockAfter = 20;
+                s.Scene = S(d, "Scene", s.Scene);
                 s.SkyPlaying = B(d, "SkyPlaying", s.SkyPlaying); s.SkyParallax = B(d, "SkyParallax", s.SkyParallax);
                 s.SkyConstellations = B(d, "SkyConstellations", s.SkyConstellations);
                 s.SkyHourly = B(d, "SkyHourly", s.SkyHourly); s.ShowTonight = B(d, "ShowTonight", s.ShowTonight);
@@ -127,8 +124,7 @@ namespace NightfallMoonClock
             {
                 Directory.CreateDirectory(Folder);
                 System.Globalization.CultureInfo inv = System.Globalization.CultureInfo.InvariantCulture;
-                string temp = FilePath + ".tmp";
-                File.WriteAllLines(temp, new string[] {
+                File.WriteAllLines(FilePath, new string[] {
                     "X=" + X, "Y=" + Y,
                     "Locked=" + Bool(Locked), "Use24h=" + Bool(Use24h), "ShowPlaying=" + Bool(ShowPlaying), "BigMoon=" + Bool(BigMoon),
                     "Font=" + Font,
@@ -136,14 +132,11 @@ namespace NightfallMoonClock
                     "SkyShooting=" + Bool(SkyShooting), "SkyShowers=" + Bool(SkyShowers), "SkyMoon=" + Bool(SkyMoon),
                     "SkyClock=" + Bool(SkyClock), "SkyThoughts=" + Bool(SkyThoughts),
                     "Weather=" + Weather, "City=" + City,
-                    "SkyColors=" + SkyColors, "SkyExtras=" + SkyExtras, "MoonStyle=" + MoonStyle, "RealMoon=1", "LockAfter=" + LockAfter, "LockEnabled=" + Bool(LockEnabled),
-                    "SkyPlaying=" + Bool(SkyPlaying), "SkyParallax=" + Bool(SkyParallax), "SkyConstellations=" + Bool(SkyConstellations), "SkyHourly=" + Bool(SkyHourly), "ShowTonight=" + Bool(ShowTonight),
+                    "SkyColors=" + SkyColors, "SkyExtras=" + SkyExtras, "MoonStyle=" + MoonStyle, "RealMoon=1", "LockAfter=" + LockAfter,
+                    "Scene=" + Scene, "SkyPlaying=" + Bool(SkyPlaying), "SkyParallax=" + Bool(SkyParallax), "SkyConstellations=" + Bool(SkyConstellations), "SkyHourly=" + Bool(SkyHourly), "ShowTonight=" + Bool(ShowTonight),
                     "AlignRight=" + Bool(AlignRight), "CenterTaskbar=" + Bool(CenterTaskbar), "TaskbarStyle=" + TaskbarStyle, "TaskbarMaximized=" + TaskbarMaximized, "RightEdge=" + RightEdge,
                     "Lat=" + (double.IsNaN(Lat) ? "" : Lat.ToString(inv)), "Lon=" + (double.IsNaN(Lon) ? "" : Lon.ToString(inv))
                 });
-                // write the new file first, then swap it in, so a crash mid-save can't wipe your settings
-                if (File.Exists(FilePath)) File.Replace(temp, FilePath, null);
-                else File.Move(temp, FilePath);
             }
             catch { }
         }
@@ -415,123 +408,52 @@ namespace NightfallMoonClock
     // ---------------------------------------------------------------- now playing
     static class NowPlaying
     {
-        // Reads Windows' media controls (the same info as the volume flyout) through
-        // reflection, so the build needs no Windows Runtime references and always
-        // includes this feature. Works on Windows 10 version 1809 and newer.
         public static volatile string Last;
-
-        const string Ns = "Windows.Media.Control.";
-        const string WinRT = ", Windows.Media.Control, ContentType=WindowsRuntime";
-        static readonly object gate = new object();
-        static int state;                    // 0 = not checked yet, 1 = available, -1 = not on this PC
-        static Type managerType, sessionType, infoType, propsType;
-        static MethodInfo asTask;            // WindowsRuntimeSystemExtensions.AsTask<T>(IAsyncOperation<T>)
-        static object manager;
-
-        public static bool Supported { get { return Init(); } }
-
-        static bool Init()
-        {
-            lock (gate)
-            {
-                if (state != 0) return state > 0;
-                state = -1;
-                try
-                {
-                    managerType = Type.GetType(Ns + "GlobalSystemMediaTransportControlsSessionManager" + WinRT);
-                    sessionType = Type.GetType(Ns + "GlobalSystemMediaTransportControlsSession" + WinRT);
-                    infoType = Type.GetType(Ns + "GlobalSystemMediaTransportControlsSessionPlaybackInfo" + WinRT);
-                    propsType = Type.GetType(Ns + "GlobalSystemMediaTransportControlsSessionMediaProperties" + WinRT);
-                    Type ext = null;
-                    foreach (string version in new string[] { "4.0.0.0", "4.0.10.0" })
-                    {
-                        try
-                        {
-                            ext = Assembly.Load("System.Runtime.WindowsRuntime, Version=" + version + ", Culture=neutral, PublicKeyToken=b77a5c561934e089")
-                                          .GetType("System.WindowsRuntimeSystemExtensions");
-                        }
-                        catch { }
-                        if (ext != null) break;
-                    }
-                    if (ext != null)
-                        foreach (MethodInfo m in ext.GetMethods(BindingFlags.Public | BindingFlags.Static))
-                        {
-                            if (m.Name != "AsTask" || !m.IsGenericMethodDefinition) continue;
-                            ParameterInfo[] ps = m.GetParameters();
-                            if (ps.Length == 1 && ps[0].ParameterType.Name == "IAsyncOperation`1") { asTask = m; break; }
-                        }
-                    if (managerType != null && sessionType != null && infoType != null && propsType != null && asTask != null) state = 1;
-                }
-                catch { }
-                return state > 0;
-            }
-        }
-
-        // waits for a Windows Runtime async result, but never forever
-        static object Await(object operation, Type resultType)
-        {
-            if (operation == null) return null;
-            Task task = (Task)asTask.MakeGenericMethod(resultType).Invoke(null, new object[] { operation });
-            if (!task.Wait(4000)) return null;
-            return task.GetType().GetProperty("Result").GetValue(task, null);
-        }
-
-        static object Call(Type type, object target, string method)
-        {
-            return type.GetMethod(method, Type.EmptyTypes).Invoke(target, null);
-        }
-
-        static object Get(Type type, object target, string property)
-        {
-            return type.GetProperty(property).GetValue(target, null);
-        }
-
-        static bool IsPlaying(object session)
-        {
-            if (session == null) return false;
-            object info = Call(sessionType, session, "GetPlaybackInfo");
-            if (info == null) return false;
-            object status = Get(infoType, info, "PlaybackStatus");
-            return status != null && status.ToString() == "Playing";
-        }
+#if MEDIA
+        static GlobalSystemMediaTransportControlsSessionManager manager;
 
         public static string Query()
         {
-            if (!Init()) return null;
             try
             {
                 if (manager == null)
-                    manager = Await(managerType.GetMethod("RequestAsync").Invoke(null, null), managerType);
-                if (manager == null) return null;
-
-                // Windows' "current" session is often a paused browser tab while music plays
-                // somewhere else, so prefer it only if it is actually playing.
-                object playingSession = null;
-                object current = Call(managerType, manager, "GetCurrentSession");
-                if (IsPlaying(current)) playingSession = current;
-                else
-                {
-                    System.Collections.IEnumerable all = Call(managerType, manager, "GetSessions") as System.Collections.IEnumerable;
-                    if (all != null)
-                        foreach (object session in all)
-                            if (IsPlaying(session)) { playingSession = session; break; }
-                }
-                if (playingSession == null) return null;
-
-                object props = Await(Call(sessionType, playingSession, "TryGetMediaPropertiesAsync"), propsType);
-                if (props == null) return null;
-                string title = (Get(propsType, props, "Title") as string ?? "").Trim();
-                if (title.Length == 0) return null;
-                string artist = (Get(propsType, props, "Artist") as string ?? "").Trim();
+                    manager = Wait(GlobalSystemMediaTransportControlsSessionManager.RequestAsync());
+                GlobalSystemMediaTransportControlsSession session = manager.GetCurrentSession();
+                if (session == null) return null;
+                GlobalSystemMediaTransportControlsSessionPlaybackInfo info = session.GetPlaybackInfo();
+                if (info == null || info.PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+                    return null;
+                GlobalSystemMediaTransportControlsSessionMediaProperties props = Wait(session.TryGetMediaPropertiesAsync());
+                if (props == null || string.IsNullOrEmpty(props.Title)) return null;
+                string artist = props.Artist ?? "";
                 if (artist.EndsWith(" - Topic")) artist = artist.Substring(0, artist.Length - 8);
-                return artist.Length > 0 ? title + "  \u00B7  " + artist : title;
+                return artist.Length > 0 ? props.Title + "  \u00B7  " + artist : props.Title;
             }
             catch
             {
-                manager = null;   // ask Windows for a fresh manager next time
+                manager = null;
                 return null;
             }
         }
+        public static bool Supported { get { return true; } }
+
+        // Waits for a Windows Runtime result directly. The usual helper for this needs the full Windows SDK to build.
+        // Names are fully qualified so Windows.Foundation's Point/Size types never clash with System.Drawing's.
+        static T Wait<T>(Windows.Foundation.IAsyncOperation<T> op)
+        {
+            System.Diagnostics.Stopwatch timer = System.Diagnostics.Stopwatch.StartNew();
+            while (op.Status == Windows.Foundation.AsyncStatus.Started)
+            {
+                if (timer.ElapsedMilliseconds > 3000) { op.Cancel(); throw new TimeoutException(); }
+                Thread.Sleep(15);
+            }
+            if (op.Status != Windows.Foundation.AsyncStatus.Completed) throw new InvalidOperationException("media query failed");
+            return op.GetResults();
+        }
+#else
+        public static string Query() { return null; }
+        public static bool Supported { get { return false; } }
+#endif
     }
 
     // ---------------------------------------------------------------- window
@@ -546,7 +468,7 @@ namespace NightfallMoonClock
         System.Windows.Forms.Timer idleTimer = new System.Windows.Forms.Timer();
         AwaySettingsForm awayForm;
         NotifyIcon tray = new NotifyIcon();
-        ToolStripMenuItem lockItem, lockPcItem, h24Item, playingItem, startupItem, bigMoonItem, tonightItem, alignItem, centerItem;
+        ToolStripMenuItem lockItem, h24Item, playingItem, startupItem, bigMoonItem, tonightItem, alignItem, centerItem;
         string playing;
         string lastRendered = "";
         float scale = 1f;
@@ -573,7 +495,7 @@ namespace NightfallMoonClock
             idleTimer.Tick += delegate { CheckIdle(); };
             idleTimer.Start();
             WeatherService.Refresh(settings, true);
-            TaskbarCenter.SetEnabled(settings.CenterTaskbar && TaskbarCenter.Supported);
+            TaskbarCenter.SetEnabled(settings.CenterTaskbar);
             TaskbarLook.Configure(settings.TaskbarStyle, settings.TaskbarMaximized);
         }
 
@@ -631,7 +553,7 @@ namespace NightfallMoonClock
         void OpenAwaySettings()
         {
             if (awayForm != null && !awayForm.IsDisposed) { awayForm.Activate(); return; }
-            awayForm = new AwaySettingsForm(settings, delegate { SyncMenu(); });
+            awayForm = new AwaySettingsForm(settings, delegate { });
             awayForm.Show();
         }
 
@@ -651,7 +573,7 @@ namespace NightfallMoonClock
             centerItem = new ToolStripMenuItem("Center taskbar icons", null, delegate
             {
                 settings.CenterTaskbar = !settings.CenterTaskbar; settings.Save();
-                TaskbarCenter.SetEnabled(settings.CenterTaskbar && TaskbarCenter.Supported); SyncMenu();
+                TaskbarCenter.SetEnabled(settings.CenterTaskbar); SyncMenu();
             });
             alignItem = new ToolStripMenuItem("Align to the right", null, delegate
             {
@@ -678,20 +600,12 @@ namespace NightfallMoonClock
                 new string[] { "same", "clear", "blur", "acrylic", "normal" }, false));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Show the night sky now", null, delegate { SkyManager.Start(settings); }));
-            lockPcItem = new ToolStripMenuItem("Lock my PC in away mode", null, delegate
-            {
-                settings.LockEnabled = !settings.LockEnabled; settings.Save(); SyncMenu();
-                if (awayForm != null && !awayForm.IsDisposed) awayForm.SyncLock();
-            });
-            menu.Items.Add(lockPcItem);
             menu.Items.Add(new ToolStripMenuItem("Away mode settings...", null, delegate { OpenAwaySettings(); }));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Move back to the top right", null, delegate { ResetPosition(); }));
             menu.Items.Add(new ToolStripMenuItem("Quit Moon Clock", null, delegate { DesktopIcons.Show(); TaskbarCenter.SetEnabled(false); TaskbarLook.Stop(); tray.Visible = false; Application.Exit(); }));
             playingItem.Enabled = NowPlaying.Supported;
-            centerItem.Enabled = TaskbarCenter.Supported;
-            if (!TaskbarCenter.Supported) centerItem.Text = "Center taskbar icons (Windows 11 does this itself)";
-            if (!NowPlaying.Supported) playingItem.Text = "Show what's playing (needs Windows 10 version 1809 or newer)";
+            if (!NowPlaying.Supported) playingItem.Text = "Show what's playing (not available in this build)";
 
             tray.ContextMenuStrip = menu;
             tray.Text = "Moon Clock";
@@ -725,14 +639,14 @@ namespace NightfallMoonClock
         {
             lockItem.Checked = settings.Locked;
             h24Item.Checked = settings.Use24h;
-            lockPcItem.Checked = settings.LockEnabled;
-            lockPcItem.Text = settings.LockEnabled ? "Lock my PC in away mode (after " + settings.LockAfter + " min)" : "Lock my PC in away mode";
             playingItem.Checked = settings.ShowPlaying && NowPlaying.Supported;
             startupItem.Checked = IsStartup();
             bigMoonItem.Checked = settings.BigMoon;
             tonightItem.Checked = settings.ShowTonight;
             alignItem.Checked = settings.AlignRight;
-            centerItem.Checked = settings.CenterTaskbar && TaskbarCenter.Supported;
+            centerItem.Checked = settings.CenterTaskbar && TaskbarSupport.Supported;
+            centerItem.Enabled = TaskbarSupport.Supported;
+            if (!TaskbarSupport.Supported) centerItem.Text = "Center taskbar icons (Windows 10 only)";
             tray.Text = settings.Locked ? "Moon Clock (locked)" : "Moon Clock (drag to move)";
         }
 
@@ -744,9 +658,7 @@ namespace NightfallMoonClock
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 Moon.Draw(g, 16, 16, 11, 0.32, false);
             }
-            IntPtr handle = bmp.GetHicon();
-            try { using (Icon temp = Icon.FromHandle(handle)) return (Icon)temp.Clone(); }
-            finally { Native.DestroyIcon(handle); bmp.Dispose(); }
+            return Icon.FromHandle(bmp.GetHicon());
         }
 
         void SetLocked(bool locked)
@@ -831,8 +743,7 @@ namespace NightfallMoonClock
 
         void PollMediaOnce()
         {
-            // also checked for the away-mode lock, which never locks while something is playing
-            string now = (settings.ShowPlaying || settings.PauseForMedia || settings.SkyPlaying || settings.ShouldLock) ? NowPlaying.Query() : null;
+            string now = (settings.ShowPlaying || settings.PauseForMedia || settings.SkyPlaying) ? NowPlaying.Query() : null;
             NowPlaying.Last = now;
             if (now != playing)
             {
@@ -1036,7 +947,6 @@ namespace NightfallMoonClock
         [StructLayout(LayoutKind.Sequential, Pack = 1)] struct BLENDFUNCTION { public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat; }
 
         [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-        [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr hIcon);
         [DllImport("user32.dll")] public static extern bool ReleaseCapture();
         [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);

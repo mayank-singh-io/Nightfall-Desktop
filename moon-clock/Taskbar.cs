@@ -7,9 +7,29 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Automation;
 using System.Collections.Generic;
+using Microsoft.Win32;
 
 namespace NightfallMoonClock
 {
+    // The taskbar features are built for Windows 10. Windows 11's taskbar works differently, so they switch off there.
+    static class TaskbarSupport
+    {
+        public static readonly bool Supported = Check();
+        static bool Check()
+        {
+            try
+            {
+                using (RegistryKey k = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+                {
+                    int build;
+                    if (k != null && int.TryParse(Convert.ToString(k.GetValue("CurrentBuildNumber")), out build)) return build < 22000;
+                }
+            }
+            catch { }
+            return true;
+        }
+    }
+
     static class TaskbarCenter
     {
         [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
@@ -27,26 +47,9 @@ namespace NightfallMoonClock
         static int busy;
         static volatile bool enabled;
 
-        // Windows 11 has a new taskbar that centers icons on its own and can't be moved this way.
-        public static bool Supported
-        {
-            get
-            {
-                try
-                {
-                    using (Microsoft.Win32.RegistryKey key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
-                    {
-                        int build;
-                        if (key != null && int.TryParse(key.GetValue("CurrentBuildNumber") as string, out build)) return build < 22000;
-                    }
-                }
-                catch { }
-                return true;
-            }
-        }
-
         public static void SetEnabled(bool on)
         {
+            if (!TaskbarSupport.Supported) on = false;
             enabled = on;
             if (on)
             {
@@ -176,29 +179,24 @@ namespace NightfallMoonClock
 
         static Timer timer;
         static volatile string style = "off", maximizedStyle = "same";
-        static volatile bool active;
         static int busy;
         static readonly Dictionary<IntPtr, string> lastLook = new Dictionary<IntPtr, string>();
 
         public static void Configure(string normal, string whenMaximized)
         {
+            if (!TaskbarSupport.Supported) { normal = "off"; whenMaximized = "same"; }
             style = normal;
             maximizedStyle = whenMaximized;
             bool on = normal != "off" || whenMaximized != "same";
-            active = on;
             if (on && timer == null) timer = new Timer(delegate { Tick(); }, null, 0, 120);
-            if (!on) Stop();
+            if (!on && timer != null) { timer.Dispose(); timer = null; RestoreAll(); }
+            if (normal == "off" && whenMaximized == "same") RestoreAll();
         }
 
         public static void Stop()
         {
-            active = false;
             if (timer != null) { timer.Dispose(); timer = null; }
-            // A tick may already be running on another thread; wait for it, or it could
-            // re-apply the look after we reset it and leave the taskbar see-through.
-            for (int i = 0; i < 50 && Interlocked.CompareExchange(ref busy, 1, 0) == 1; i++) Thread.Sleep(20);
-            try { RestoreAll(); }
-            finally { Interlocked.Exchange(ref busy, 0); }
+            RestoreAll();
         }
 
         static List<IntPtr> Taskbars()
@@ -260,7 +258,6 @@ namespace NightfallMoonClock
             if (Interlocked.Exchange(ref busy, 1) == 1) return;
             try
             {
-                if (!active) return;
                 HashSet<IntPtr> maxed = maximizedStyle != "same" ? MaximizedMonitors() : null;
                 lock (lastLook)
                 foreach (IntPtr bar in Taskbars())
