@@ -32,6 +32,9 @@ When you're idle, your desktop icons hide first, then a full-screen night sky fa
 - Weather that matches outside (rain, storm, snow, fog), sky colors that follow the time of day, drifting clouds, a soft aurora, and gentle parallax
 
   ![Sky options](screenshots/sky-options.png)
+- **Live illustrated scenes:** choose River Night (rain, a shimmering river, a cabin window flickering like firelight), Galaxy Peaks, City Below (glimmering city lights), or Rain over the City, or get a different one each time
+
+  ![Live scenes](screenshots/live-scenes.png)
 - A quiet shimmer at the top of each hour, 250 poetic lines that change every minute, and an optional lock after a while
 - Skips full-screen apps and games, and never locks while something is playing
 
