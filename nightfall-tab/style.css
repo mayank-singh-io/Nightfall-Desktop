@@ -359,3 +359,53 @@ fieldset label { display: flex; align-items: center; gap: 8px; margin: 6px 0; co
 #todo-error { margin: 4px 0 0; min-height: 0; }
 #todo-error:empty { display: none; }
 #notes-mini[hidden] { display: none; }
+
+/* ---------- live scenes ---------- */
+#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: none; }
+body.scene-on #scene { display: block; }
+body.scene-on #sky, body.scene-on .ridges, body.scene-on #weather, body.scene-on #moon-label { display: none; }
+body.scene-on { background: #07050b; }
+body.scene-on #clock, body.scene-on #greeting, body.scene-on #thought { text-shadow: 0 2px 12px rgba(0, 0, 0, 0.45); }
+#settings select:disabled { opacity: 0.5; }
+/* soft shade behind the clock, search and sites, so they stay readable on bright scenes */
+body.scene-on main { z-index: 1; }
+body.scene-on main::before {
+  content: "";
+  position: absolute;
+  left: 50%; top: 6vh;
+  width: min(980px, 96vw); height: 64vh;
+  transform: translateX(-50%);
+  background: radial-gradient(closest-side, rgba(8, 5, 14, 0.5), rgba(8, 5, 14, 0));
+  z-index: -1;
+  pointer-events: none;
+}
+body.scene-on #thought {
+  z-index: 1;
+  width: fit-content;
+  padding: 6px 16px;
+  border-radius: 12px;
+  background: rgba(8, 5, 14, 0.35);
+  color: var(--soft);
+}
+body.scene-on #thought:empty { display: none; }
+
+/* ---------- settings tabs ---------- */
+.settings-tabs { display: flex; gap: 4px; margin: 0 0 14px; padding: 4px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); }
+#settings .settings-tabs button { flex: 1; margin: 0; padding: 7px 4px; border: 0; border-radius: 9px; background: transparent; color: var(--soft); font: inherit; font-size: 13px; cursor: pointer; }
+#settings .settings-tabs button:hover { background: rgba(255, 255, 255, 0.06); }
+#settings .settings-tabs button[aria-selected="true"] { background: rgba(255, 255, 255, 0.16); color: var(--text); font-weight: 500; }
+#settings .settings-tabs button:focus-visible { outline: 2px solid var(--accent, #c9b6e4); outline-offset: 1px; }
+#settings fieldset[hidden] { display: none; }
+
+/* ---------- scene picker ---------- */
+.scene-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0 12px; }
+#settings .scene-grid button { margin: 0; width: auto; padding: 0; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; background: rgba(255, 255, 255, 0.03); color: var(--soft); font: inherit; font-size: 11px; cursor: pointer; overflow: hidden; text-align: center; }
+#settings .scene-grid button img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+#settings .scene-grid button span { display: block; padding: 5px 4px 6px; line-height: 1.25; }
+#settings .scene-grid button:hover { border-color: rgba(255, 255, 255, 0.28); }
+#settings .scene-grid button[aria-checked="true"] { border: 2px solid #c9b6e4; color: var(--text); }
+.scene-grid.off { opacity: 0.45; pointer-events: none; }
+
+/* panels and corner controls always sit above the page content (and above a scene's shading) */
+#settings, #open-settings, #make-meteors, .corner-btn { z-index: 10; }
+#notes-wrap { z-index: 10; }

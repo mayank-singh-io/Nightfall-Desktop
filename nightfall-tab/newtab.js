@@ -12,6 +12,12 @@ const DEFAULTS = {
   city: null,
   notesStyle: "tiny",
   realConstellations: true,
+  tabScene: "classic",
+  tabSceneKey: "aurora",
+  trainEvery: "few",
+  timeOfDay: "sunrise",
+  roomView: "random",
+  clickStars: true, clickLights: true, clickWater: true, mouseShift: false,
   notesPosition: "pos-bl",
   links: [
     { name: "YouTube Music", url: "https://music.youtube.com" },
@@ -28,6 +34,8 @@ function readJSON(key, fallback) {
 function writeJSON(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
+let sceneStarting = false, sceneBase = null, roomWeatherSeen = null;
+const sceneStill = matchMedia("(prefers-reduced-motion: reduce)").matches;   // respect "reduce motion"
 let settings = { ...structuredClone(DEFAULTS), ...readJSON("nightfall", {}) };
 function saveSettings() { writeJSON("nightfall", settings); }
 
@@ -358,6 +366,9 @@ function buildFogTexture() {
 
 function setWeather(kind) {
   weatherKind = kind;
+  if (NightScene.active && settings.tabScene === "fixed" && sceneBase === "room" && settings.roomView === "weather" && roomWeatherSeen !== kind) {
+    roomWeatherSeen = kind; applyTabScene();
+  }
   drops = [];
   fogTexture = null;
   const area = innerWidth * innerHeight;
@@ -445,6 +456,7 @@ let hoverStar = -1;
 function starPos(i) { const s = STAR_POOL[i]; return { x: s.u * innerWidth, y: s.v * innerHeight }; }
 
 function resize() {
+  if (NightScene.active) NightScene.resize();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   for (const c of [canvas, wcanvas]) { c.width = innerWidth * dpr; c.height = innerHeight * dpr; }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -530,7 +542,7 @@ function startShower(now) {
 function checkShower(now) {
   if (reduceMotion || !SHOWER_EVERY[settings.showerFrequency] || document.visibilityState !== "visible") return;
   const at = nextShowerAt();
-  if (at && Date.now() >= at) { scheduleShower(); startShower(now); }
+  if (at && Date.now() >= at) { scheduleShower(); if (NightScene.active) NightScene.shower(now); else startShower(now); }
 }
 function meteorHead(m, t) {
   const k = (t - m.start) / m.duration;
@@ -568,6 +580,7 @@ function isSkyTarget(el) {
   return !el.closest("a, button, input, textarea, select, label, form, #settings, #notes-wrap, #clock, #greeting, #thought");
 }
 document.addEventListener("click", (e) => {
+  if (NightScene.active) return;
   if (!isSkyTarget(e.target)) return;
   const t = performance.now();
   const i = nearestStar(e.clientX, e.clientY);
@@ -581,6 +594,7 @@ document.addEventListener("click", (e) => {
 });
 let hoverPending = false, lastMouse = null;
 document.addEventListener("mousemove", (e) => {
+  if (NightScene.active) return;
   lastMouse = e;
   if (hoverPending) return;
   hoverPending = true;
@@ -710,7 +724,14 @@ function draw(t) {
 let lastFrame = 0, lastShowerCheck = 0;
 function loop(t) {
   const elapsed = t - lastFrame;
-  if (elapsed >= 33) {
+  if (NightScene.active && sceneStill) {
+    if (elapsed >= 1000) { NightScene.draw(t, -1e9); lastFrame = t; }
+  } else if (elapsed >= 33 && NightScene.active) {
+    if (t - lastShowerCheck > 1000) { checkShower(t); lastShowerCheck = t; }
+    NightScene.step(t, Math.min(elapsed, 100) / 1000, settings.shootingStars);
+    NightScene.draw(t, -1e9);
+    lastFrame = t;
+  } else if (elapsed >= 33) {
     if (settings.shootingStars && !shooter && t > nextShot) {
       shooter = {
         x: innerWidth * (0.35 + Math.random() * 0.6), y: innerHeight * (0.05 + Math.random() * 0.25),
@@ -851,6 +872,12 @@ function syncOptions() {
   $("opt-notes-style").value = settings.notesStyle;
   $("opt-notes-pos").value = settings.notesPosition;
   $("opt-real-constellations").checked = settings.realConstellations;
+  $("opt-tab-scene").value = settings.tabScene;
+  $("opt-tab-scene-key").value = settings.tabSceneKey;
+  $("opt-train").value = settings.trainEvery; $("opt-room").value = settings.roomView; $("opt-time").value = settings.timeOfDay;
+  $("opt-click-stars").checked = settings.clickStars; $("opt-click-lights").checked = settings.clickLights;
+  $("opt-click-water").checked = settings.clickWater; $("opt-parallax").checked = settings.mouseShift;
+  syncSceneControls();
   updateWeatherStatus();
   updateMoonStatus();
 }
@@ -884,9 +911,12 @@ $("opt-weather").addEventListener("change", (e) => {
 $("opt-notes-style").addEventListener("change", (e) => { settings.notesStyle = e.target.value; saveSettings(); renderMini(); });
 $("opt-notes-pos").addEventListener("change", (e) => { settings.notesPosition = e.target.value; saveSettings(); placeNotes(); });
 $("opt-real-constellations").addEventListener("change", (e) => { settings.realConstellations = e.target.checked; saveSettings(); });
+$("opt-tab-scene").addEventListener("change", (e) => { settings.tabScene = e.target.value; saveSettings(); syncSceneControls(); applyTabScene(); });
+$("opt-tab-scene-key").addEventListener("change", (e) => { settings.tabSceneKey = e.target.value; saveSettings(); applyTabScene(); });
 $("clear-constellations").addEventListener("click", () => { constellations = []; building = []; saveConstellations(); });
 
 function userShower() {
+  if (NightScene.active) { NightScene.shower(performance.now()); return; }
   if (reduceMotion || meteors.length > 60) return;
   startShower(performance.now());
 }
@@ -907,3 +937,87 @@ renderMini();
 refreshWeather();
 setInterval(() => { if (document.visibilityState === "visible") refreshWeather(); }, 10 * 60000);
 if (!reduceMotion) requestAnimationFrame(loop);
+
+// ================= Live scenes =================
+(function fillSceneList() {
+  const sel = $("opt-tab-scene-key");
+  NightScene.KEYS.forEach((k, i) => { const o = document.createElement("option"); o.value = k; o.textContent = NightScene.NAMES[i]; sel.append(o); });
+})();
+function sceneOptions() {
+  return {
+    trainGap: settings.trainEvery === "loop" ? 0 : settings.trainEvery === "ten" ? 600 : 180,
+    roomView: settings.roomView, weather: typeof weatherKind === "string" ? weatherKind : "clear",
+    timeOfDay: settings.timeOfDay, lat: settings.city ? settings.city.lat : undefined, lon: settings.city ? settings.city.lon : undefined,
+    stars: settings.clickStars, lights: settings.clickLights, water: settings.clickWater, parallax: settings.mouseShift
+  };
+}
+// clicks on the scene itself (not on the search box, sites, notes or settings)
+document.addEventListener("click", (e) => {
+  if (!NightScene.active) return;
+  if (e.target.closest("input, button, a, select, textarea, label, #settings, #notes, #notes-mini, form, .tile")) return;
+  NightScene.click(e.clientX, e.clientY);
+});
+document.addEventListener("mousemove", (e) => { if (NightScene.active) NightScene.pointer((e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1); });
+$("opt-time").addEventListener("change", (e) => { settings.timeOfDay = e.target.value; saveSettings(); NightScene.setOptions(sceneOptions()); });
+for (const [id, key] of [["opt-train", "trainEvery"], ["opt-room", "roomView"]]) $(id).addEventListener("change", (e) => { settings[key] = e.target.value; saveSettings(); applyTabScene(); });
+for (const [id, key] of [["opt-click-stars", "clickStars"], ["opt-click-lights", "clickLights"], ["opt-click-water", "clickWater"], ["opt-parallax", "mouseShift"]])
+  $(id).addEventListener("change", (e) => { settings[key] = e.target.checked; saveSettings(); NightScene.setOptions(sceneOptions()); });
+function syncSceneControls() {
+  $("opt-tab-scene-key").disabled = settings.tabScene !== "fixed";
+  const grid = $("scene-grid"); if (grid) grid.classList.toggle("off", settings.tabScene !== "fixed");
+}
+async function applyTabScene() {
+  if (settings.tabScene === "classic") { NightScene.stop(); document.body.classList.remove("scene-on"); return; }
+  const key = settings.tabScene === "random" ? NightScene.KEYS[Math.floor(Math.random() * NightScene.KEYS.length)] : settings.tabSceneKey;
+  sceneBase = key;
+  if (sceneStarting) return;
+  sceneStarting = true;
+  try {
+    await NightScene.start(key, $("scene"), sceneOptions());
+    document.body.classList.add("scene-on");
+  } catch {
+    NightScene.stop(); document.body.classList.remove("scene-on");   // if a scene can't load, the classic sky stays
+  } finally { sceneStarting = false; }
+}
+applyTabScene();
+
+// ================= Settings tabs =================
+(function settingsTabs() {
+  const tabs = [...document.querySelectorAll(".settings-tabs [role=tab]")];
+  const show = (name) => {
+    tabs.forEach((t) => t.setAttribute("aria-selected", String(t.dataset.show === name)));
+    document.querySelectorAll("#settings fieldset[data-tab]").forEach((f) => { f.hidden = f.dataset.tab !== name; });
+    try { sessionStorage.setItem("nightfall-tab", name); } catch {}
+  };
+  tabs.forEach((t, i) => {
+    t.addEventListener("click", () => show(t.dataset.show));
+    t.addEventListener("keydown", (e) => {   // arrow keys move between tabs
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      const next = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+      next.focus(); show(next.dataset.show);
+    });
+  });
+  let start = "sites";
+  try { start = sessionStorage.getItem("nightfall-tab") || "sites"; } catch {}
+  show(start);
+})();
+
+// ================= Scene picker =================
+function buildSceneGrid() {
+  const grid = $("scene-grid"), sel = $("opt-tab-scene-key");
+  grid.textContent = "";
+  NightScene.KEYS.forEach((k, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.setAttribute("role", "radio"); b.dataset.key = k;
+    b.setAttribute("aria-checked", String(settings.tabSceneKey === k));
+    const img = document.createElement("img"); img.src = `scenes/thumbs/${k}.jpg`; img.alt = ""; img.loading = "lazy";
+    const label = document.createElement("span"); label.textContent = NightScene.NAMES[i];
+    b.append(img, label);
+    b.addEventListener("click", () => {
+      sel.value = k; sel.dispatchEvent(new Event("change"));
+      grid.querySelectorAll("button").forEach((x) => x.setAttribute("aria-checked", String(x === b)));
+    });
+    grid.append(b);
+  });
+}
+buildSceneGrid();

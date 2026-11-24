@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body data-sky="night">
+  <canvas id="scene" aria-hidden="true"></canvas>
   <canvas id="sky" aria-hidden="true"></canvas>
 
   <svg class="ridges" viewBox="0 0 1600 360" preserveAspectRatio="none" aria-hidden="true">
@@ -61,8 +62,15 @@
 
   <aside id="settings" hidden aria-labelledby="settings-title">
     <h2 id="settings-title">Customize</h2>
+    <nav class="settings-tabs" role="tablist" aria-label="Settings sections">
+      <button type="button" role="tab" data-show="sites">Sites</button>
+      <button type="button" role="tab" data-show="scene">Scene</button>
+      <button type="button" role="tab" data-show="sky">Sky</button>
+      <button type="button" role="tab" data-show="weather">Weather</button>
+      <button type="button" role="tab" data-show="more">More</button>
+    </nav>
 
-    <fieldset>
+    <fieldset data-tab="sites">
       <legend>Your sites</legend>
       <ul id="link-list"></ul>
       <div class="add-row">
@@ -73,12 +81,50 @@
       <p class="error" id="link-error" role="alert"></p>
     </fieldset>
 
-    <fieldset>
+    <fieldset data-tab="more">
       <legend>Clock</legend>
       <label><input type="checkbox" id="opt-24h"> Use 24-hour time</label>
     </fieldset>
 
-    <fieldset>
+    <fieldset data-tab="scene">
+      <legend>Scene</legend>
+      <label for="opt-tab-scene">Background</label>
+      <select id="opt-tab-scene">
+        <option value="classic">Classic starfield</option>
+        <option value="fixed">One scene I pick</option>
+        <option value="random">A different scene each tab</option>
+      </select>
+      <select id="opt-tab-scene-key" hidden aria-hidden="true" tabindex="-1"></select>
+      <div id="scene-grid" class="scene-grid" role="radiogroup" aria-label="Scene"></div>
+      <label for="opt-time">Time of day</label>
+      <select id="opt-time">
+        <option value="sunrise">Follow the real sunrise</option>
+        <option value="both">Follow the real sunrise and sunset</option>
+        <option value="night">Always night</option>
+        <option value="dawn">Always dawn</option>
+      </select>
+      <label for="opt-train">Steam Train passes</label>
+      <select id="opt-train">
+        <option value="few">Every few minutes</option>
+        <option value="ten">Every 10 minutes</option>
+        <option value="loop">Always, one after another</option>
+      </select>
+      <label for="opt-room">Cozy Room window</label>
+      <select id="opt-room">
+        <option value="city">Rainy City</option>
+        <option value="lake">Mountain Lake</option>
+        <option value="snow">Snowy Forest</option>
+        <option value="sea">Beach and Sea</option>
+        <option value="random">A different view each time</option>
+        <option value="weather">Match the weather outside</option>
+      </select>
+      <label><input type="checkbox" id="opt-click-stars"> Click the sky for a shooting star</label>
+      <label><input type="checkbox" id="opt-click-lights"> Click windows and lamps to switch them</label>
+      <label><input type="checkbox" id="opt-click-water"> Click water for ripples</label>
+      <label><input type="checkbox" id="opt-parallax"> Move the mouse to gently shift the view</label>
+      <p class="hint">Scenes have their own moon and weather. The Sky tab is for the classic starfield.</p>
+    </fieldset>
+    <fieldset data-tab="sky">
       <legend>Sky</legend>
       <label for="opt-sky">Sky color</label>
       <select id="opt-sky">
@@ -115,7 +161,7 @@
       <button id="preview-shower" type="button">Preview a meteor shower</button>
     </fieldset>
 
-    <fieldset>
+    <fieldset data-tab="weather">
       <legend>Weather</legend>
       <label for="opt-weather">Weather in the sky</label>
       <select id="opt-weather">
@@ -133,13 +179,13 @@
       <p class="hint" id="weather-status"></p>
     </fieldset>
 
-    <fieldset>
+    <fieldset data-tab="more">
       <legend>Thoughts</legend>
       <label><input type="checkbox" id="opt-thought"> Show thoughts</label>
       <label><input type="checkbox" id="opt-rotate"> Change to a new one every minute</label>
     </fieldset>
 
-    <fieldset>
+    <fieldset data-tab="more">
       <legend>Notes</legend>
       <label for="opt-notes-style">When closed, show</label>
       <select id="opt-notes-style">
@@ -155,7 +201,7 @@
       <p class="hint">Finished tasks clear at midnight. Unfinished ones carry over.</p>
     </fieldset>
 
-    <fieldset>
+    <fieldset data-tab="sky">
       <legend>Constellations</legend>
       <label><input type="checkbox" id="opt-real-constellations"> Show real constellations now and then</label>
       <p class="hint">Click stars to connect them. Click empty sky or press Esc to finish a constellation.</p>
@@ -166,6 +212,7 @@
   </aside>
 
   <script src="thoughts.js"></script>
+  <script src="scenes.js"></script>
   <script src="newtab.js"></script>
 </body>
 </html>
