@@ -25,6 +25,12 @@ A small, transparent desktop widget, built from source on your own PC with the C
 - Right-aligned, draggable, and click-through once locked
 - **Taskbar:** centers your app icons like a dock, and makes the taskbar clear, blurred, or frosted (replaces TaskbarX and TranslucentTB)
 
+**Settings** are grouped into tabs, and scenes are chosen from a grid of previews:
+
+![Settings](screenshots/settings-tabs.png)
+
+![Scene picker](screenshots/scene-picker.png)
+
 ### Away mode
 When you're idle, your desktop icons hide first, then a full-screen night sky fades in. Any mouse movement or key press brings everything back.
 
@@ -40,12 +46,28 @@ When you're idle, your desktop icons hide first, then a full-screen night sky fa
 - Weather that matches outside (rain, storm, snow, fog), sky colors that follow the time of day, drifting clouds, a soft aurora, and gentle parallax
 
   ![Sky options](screenshots/sky-options.png)
-- **Live illustrated scenes:** choose River Night (rain, a shimmering river, a cabin window flickering like firelight), Galaxy Peaks, City Below (glimmering city lights), or Rain over the City, or get a different one each time
+- **10 live illustrated scenes:** River Night, Galaxy Peaks, City Below, Rain over the City, Snowy Cabin (falling snow, chimney smoke), Ocean Shore (waves rolling in, gliding seabirds, a bobbing boat light), Desert Night (sand drifting off the dunes), Rooftop Rain (sitting on a roof with a cat and a warm mug, city windows switching on and off), Firefly Lake, and Northern Lights (aurora curtains drifting behind the mountains). Pick one, or get a different one each time.
+
+  ![New scenes](screenshots/new-scenes.png)
+- **Four more:** a Steam Train crossing a stone viaduct (smoke trailing, wheels turning, firebox glowing), a Snowy Village seen from the street (chimney smoke, windows switching on and off), a Cozy Room with four window views to choose from (Rainy City with drops sliding down the glass, Mountain Lake, Snowy Forest, Beach and Sea), and Earth from Space (city lights turning below, aurora on the edge, satellites, and the occasional astronaut drifting by). That makes **14 scenes**.
+
+  ![More scenes](screenshots/scenes-v1.2.png)
+- **Nature scenes:** a Porch in the Forest (lantern light, steam from your mug, fireflies), a Moonlit Meadow (tall grass swaying in the wind), Wide Falls (streams pouring over a mossy ledge into a pool), and a Mountain Lake at Dawn (mist drifting over the water). That makes **18 scenes**.
+
+  ![Nature scenes](screenshots/scenes-v1.4.png)
+- **Dawn versions:** every scene turns to sunrise colours around the real sunrise where you are, worked out from your city with no internet needed. Choose in Settings: follow the sunrise, the sunrise and sunset, always night, or always dawn.
+
+  ![Night and dawn](screenshots/night-and-dawn.png)
 
   ![Live scenes](screenshots/live-scenes.png)
 - A quiet shimmer at the top of each hour, and 250 poetic lines that change every minute
-- Locks your PC after the sky has been up for 20 minutes, for safety. Change the time or turn it off in Away mode settings.
+- Locks your PC after the sky has been up for 20 minutes, for safety. Change the time or turn it off in Settings.
 - Skips full-screen apps and games, and never locks while something is playing
+
+### Live wallpaper
+Any of the 18 scenes can play behind your desktop icons. It only moves while your desktop is showing: open any window and it freezes in place, using no CPU. Choose one scene, a new one each day, or a new one each time you unlock, and pause it on battery, in battery saver, or below a battery level you set.
+
+It's also interactive, on empty desktop space: click the sky for a shooting star, click windows and lamps to switch them on or off, click water for ripples, and move the mouse to gently shift the view. Each one has its own switch in Settings.
 
 ### Nightfall Tab
 A new tab page for Brave or any Chromium browser.
@@ -54,6 +76,9 @@ A new tab page for Brave or any Chromium browser.
 
 - A big clock, search, and quick links with site icons
 - An animated starfield, meteor showers on demand (press **M**), and real constellations
+- **All 18 live scenes** as your background, with dawn versions,: one you pick, or a different one each tab, with the same click-and-mouse interactions, each with its own switch
+
+  ![Scenes on the new tab](screenshots/newtab-scenes.png)
 - Draw your own constellations by clicking stars
 - Live weather, the real moon phase, and sky colors through the day
 
@@ -79,7 +104,7 @@ Nothing is changed silently, and everything can be undone.
 
 | Part | What it changes |
 |---|---|
-| **Moon Clock** | Files in `C:\Moon Clock`. The installer asks before turning on the taskbar changes. Settings in `%APPDATA%\NightfallMoonClock\settings.ini`. If you turn on "Start with Windows," an entry named `NightfallMoonClock` in your startup apps. While it runs, it can hide your desktop icons when you're away, move your taskbar icons to the center, and change the taskbar's transparency. All of these go back to normal when you quit it. |
+| **Moon Clock** | Files in `C:\Moon Clock`. The live wallpaper (off until you turn it on) draws behind your desktop icons and gives your normal wallpaper back when you turn it off or quit. The installer asks before turning on the taskbar changes. Settings in `%APPDATA%\NightfallMoonClock\settings.ini`. If you turn on "Start with Windows," an entry named `NightfallMoonClock` in your startup apps. While it runs, it can hide your desktop icons when you're away, move your taskbar icons to the center, and change the taskbar's transparency. All of these go back to normal when you quit it. |
 | **Weather** (optional) | Your saved city's coordinates are sent to [Open-Meteo](https://open-meteo.com/) to get the weather and sunrise times. Nothing else leaves your PC. |
 | **Nightfall Tab** | Replaces your browser's new tab page. Your sites, notes, and settings are stored in the browser on your PC only. |
 | **Nightfall Theme** | Your browser's colors only. |
@@ -109,7 +134,7 @@ irm https://raw.githubusercontent.com/mayank-singh-io/Nightfall-Desktop/main/uni
 
 | Part | How |
 |---|---|
-| Moon Clock | Copy `moon-clock` to `C:\Moon Clock` and double-click `build.bat`. Right-click the moon in the tray for options. |
+| Moon Clock | Copy `moon-clock` to `C:\Moon Clock` and double-click `build.bat`. Double-click the moon in the tray for Settings, or right-click it for quick options. |
 | Nightfall Tab | `brave://extensions` → turn on Developer mode → **Load unpacked** → pick the `nightfall-tab` folder. |
 | Nightfall Theme | Same as above, with the `nightfall-theme` folder. |
 | Shortcut arrows | Double-click `tweaks\remove-arrows.bat`. Undo with `restore-arrows.bat`. |
@@ -125,16 +150,16 @@ Moon Clock still works, just without the song line. Open `build-log.txt` in the 
 It's a brand-new program built on your own PC, so Windows hasn't seen it before. Click **More info → Run anyway**. You can read every line of its source in `moon-clock`.
 
 **"What's playing" doesn't show anything.**
-Check that **Show what's playing** is ticked in the tray menu, and that the music app shows up in Windows' own media controls (press a volume key and look for the song). Brave, Chrome, Spotify, and YouTube Music all do.
+Check that **Show what's playing** is ticked in Settings → **Clock**, and that the music app shows up in Windows' own media controls (press a volume key and look for the song). Brave, Chrome, Spotify, and YouTube Music all do.
 
 **My desktop icons are gone.**
 Away mode hides them while you're idle, and they come back when you move the mouse. If they ever stay hidden (for example after a crash), quit and restart Moon Clock, or right-click the desktop → **View** → **Show desktop icons**.
 
 **The taskbar icons aren't centered, or the taskbar isn't clear.**
-Make sure TaskbarX and TranslucentTB are closed, since they fight over the taskbar. Then check **Center taskbar icons** and **Taskbar look** in the tray menu. These only work on Windows 10.
+Make sure TaskbarX and TranslucentTB are closed, since they fight over the taskbar. Then check **Center taskbar icons** and **Taskbar look** in Settings → **Clock**. These only work on Windows 10.
 
-**The settings window is too tall for my screen.**
-It scrolls, and the **Save** button is always at the bottom. You can also press **Enter** to save or **Esc** to cancel.
+**Where are the settings?**
+Double-click the moon in the system tray (or right-click it → **Settings...**). They're grouped into tabs: Clock, Away mode, Scenes, Wallpaper, and Weather. **Ctrl+Tab** moves between tabs, **Enter** saves, and **Esc** cancels.
 
 **Desktop icons show black squares after removing shortcut arrows.**
 Restart your PC once. If they're still there, run `tweaks\restore-arrows.bat`.
@@ -143,7 +168,7 @@ Restart your PC once. If they're still there, run `tweaks\restore-arrows.bat`.
 In `brave://extensions` (or `chrome://extensions`), turn on **Developer mode**, click **Load unpacked**, and pick the folder that contains `manifest.json`.
 
 **How much does it slow my PC down?**
-Very little. The clock uses about 20–40 MB of memory and almost no CPU. The away-mode sky uses a few percent of CPU while it's showing, and nothing when it isn't.
+Very little. The clock uses about 20–40 MB of memory and almost no CPU. The away-mode sky and the live wallpaper each use a few percent of CPU while they're actually visible, and nothing otherwise: the wallpaper freezes whenever a window is open.
 
 **How do I remove everything?**
 Run the uninstall command under [Install](#install). It closes Moon Clock properly, removes it from startup, and asks before deleting each folder.

@@ -26,7 +26,7 @@
     }
 
     Say ""
-    Say "  Nightfall Desktop v1.0.0" Magenta
+    Say "  Nightfall Desktop v1.4.0" Magenta
     Say "  A calm night-sky setup for Windows 10`n" DarkGray
 
     if ([Environment]::OSVersion.Version.Major -lt 10) { Say "This needs Windows 10 or later." Red; return }
@@ -128,9 +128,9 @@
 
     Say "`nAll done! Enjoy the night sky." Magenta
     if ($doClock) {
-        Say "Tip: right-click the moon in your system tray for settings, or choose 'Show the night sky now'." DarkGray
+        Say "Tip: double-click the moon in your system tray for Settings, or right-click it for quick options." DarkGray
         Say "Away mode starts on: icons hide after 3 idle minutes, the sky appears after 10, and your PC locks 20 minutes after that." DarkGray
-        Say "Change or turn any of these off in the tray menu > Away mode settings." DarkGray
+        Say "Change or turn any of these off in Settings (Away mode tab), where you can also turn on the live wallpaper." DarkGray
     }
     Say "To remove everything later:  irm https://raw.githubusercontent.com/$RepoName/$Branch/uninstall.ps1 | iex" DarkGray
 }
