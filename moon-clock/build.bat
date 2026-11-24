@@ -27,12 +27,12 @@ tasklist /fi "imagename eq MoonClock.exe" | find /i "MoonClock.exe" >nul && (
 )
 
 echo Building Moon Clock with "what's playing"...
-"%CSC%" /nologo /target:winexe /optimize+ /define:MEDIA /win32icon:moon.ico /out:MoonClock.exe %REFS% !WINRT! MoonClock.cs Sky.cs Taskbar.cs > build-log.txt 2>&1
+"%CSC%" /nologo /target:winexe /optimize+ /define:MEDIA /win32icon:moon.ico /out:MoonClock.exe %REFS% !WINRT! MoonClock.cs Sky.cs Taskbar.cs Wallpaper.cs > build-log.txt 2>&1
 if errorlevel 1 (
   echo.
   echo That version didn't build on this PC. Building without "what's playing" instead...
   echo The reason was saved to build-log.txt in this folder.
-  "%CSC%" /nologo /target:winexe /optimize+ /win32icon:moon.ico /out:MoonClock.exe %REFS% MoonClock.cs Sky.cs Taskbar.cs
+  "%CSC%" /nologo /target:winexe /optimize+ /win32icon:moon.ico /out:MoonClock.exe %REFS% MoonClock.cs Sky.cs Taskbar.cs Wallpaper.cs
   if errorlevel 1 (
     echo.
     echo The build failed. Please open an issue at github.com/mayank-singh-io/Nightfall-Desktop/issues with a screenshot of this window.

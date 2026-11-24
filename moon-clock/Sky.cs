@@ -18,6 +18,7 @@ using System.Windows.Forms;
 
 namespace NightfallMoonClock
 {
+    static class Alpha { public static int Clamp(double v) { return v < 0 ? 0 : v > 255 ? 255 : (int)v; } }
     // ---------------------------------------------------------------- Win32 for away mode
     static class NativeSky
     {
@@ -232,22 +233,60 @@ namespace NightfallMoonClock
     class SceneData
     {
         public Bitmap Background;
-        public string Rain = "none";
+        public string Dir, Rain = "none", Snow = "none", FrontFile;
+        public bool NoShoot, LifeUnder;
+        public List<string[]> Sprites = new List<string[]>();
+        public List<float[]> SpriteSmoke = new List<float[]>(), SpriteGlow = new List<float[]>(), SpriteWheel = new List<float[]>();
+        public List<float[]> Pulses = new List<float[]>(), GlassDrops = new List<float[]>(), Water = new List<float[]>(), Curtains = new List<float[]>();
+        public float SatelliteEvery, DebrisEvery, AstronautEvery, PlaneEvery, ShotEvery;
+        public bool NoDawn;
+        public string DawnFile, DawnFront;
+        public List<float[]> Falls = new List<float[]>();
+        public List<string[]> Sways = new List<string[]>();
+        public float ClockTop = -1;   // where the clock sits, as a share of the screen height (default if -1)
         public List<float[]> Stars = new List<float[]>(), Lights = new List<float[]>(), Shimmers = new List<float[]>(), Ripples = new List<float[]>();
+        public List<float[]> Windows = new List<float[]>(), Smokes = new List<float[]>(), Waves = new List<float[]>(), Birds = new List<float[]>();
+        public List<float[]> Bobs = new List<float[]>(), Sands = new List<float[]>(), Toggles = new List<float[]>(), Beacons = new List<float[]>();
+        public List<float[]> Puddles = new List<float[]>(), Fireflies = new List<float[]>();
+        public List<string[]> Layers = new List<string[]>(), Reflects = new List<string[]>(), Fades = new List<string[]>();
         public List<PointF> Skyline = new List<PointF>();
-        public RectangleF Window = RectangleF.Empty;
 
-        public static readonly string[] Keys = { "river", "galaxy", "city", "raincity" };
+        public static readonly string[] Keys = { "river", "galaxy", "city", "raincity", "snowcabin", "ocean", "desert", "rooftop", "fireflies", "aurora", "train", "village", "room", "space", "porch", "meadow", "falls", "lakedawn" };
+        public static readonly string[] Names = { "River Night", "Galaxy Peaks", "City Below", "Rain over the City", "Snowy Cabin", "Ocean Shore", "Desert Night", "Rooftop Rain", "Firefly Lake", "Northern Lights", "Steam Train", "Snowy Village", "Cozy Room", "Earth from Space", "Porch in the Forest", "Moonlit Meadow", "Wide Falls", "Mountain Lake at Dawn" };
+        static readonly Random pick = new Random();
 
-        public static SceneData Load(string key)
+        // "room" becomes one of its four window views, chosen by the Cozy Room setting
+        public static string Resolve(string key, Settings s)
         {
+            if (key != "room") return key;
+            string v = s != null ? s.RoomView : "random";
+            if (v == "weather")
+            {
+                string w = WeatherService.Kind(s);
+                if (w == "rain" || w == "storm") return "room-city";
+                if (w == "snow") return "room-snow";
+                v = "random";
+            }
+            if (v == "random") { string[] all = { "room-city", "room-lake", "room-snow", "room-sea" }; return all[pick.Next(all.Length)]; }
+            return "room-" + v;
+        }
+
+        public static string Folder { get { return Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "scenes"); } }
+
+        public static SceneData Load(string key) { return Load(key, null); }
+        public static SceneData Load(string key, Settings settings)
+        {
+            key = Resolve(key, settings);
             try
             {
-                string dir = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "scenes");
-                string png = Path.Combine(dir, key + ".png"), txt = Path.Combine(dir, key + ".txt");
-                if (!File.Exists(png) || !File.Exists(txt)) return null;
+                string dir = Folder;
+                string img = Path.Combine(dir, key + ".jpg");
+                if (!File.Exists(img)) img = Path.Combine(dir, key + ".png");
+                string txt = Path.Combine(dir, key + ".txt");
+                if (!File.Exists(img) || !File.Exists(txt)) return null;
                 SceneData d = new SceneData();
-                using (Image img = Image.FromFile(png)) d.Background = new Bitmap(img);
+                d.Dir = dir;
+                using (Image im = Image.FromFile(img)) d.Background = new Bitmap(im);
                 foreach (string raw in File.ReadAllLines(txt))
                 {
                     string[] p = raw.Trim().Split(' ');
@@ -255,16 +294,51 @@ namespace NightfallMoonClock
                     switch (p[0])
                     {
                         case "rain": d.Rain = p[1]; break;
+                        case "snow": d.Snow = p[1]; break;
+                        case "noshoot": d.NoShoot = true; break;
+                        case "clock": d.ClockTop = F(p[1]); break;
+                        case "lifeunder": d.LifeUnder = true; break;
+                        case "sprite": d.Sprites.Add(p); break;
+                        case "spritesmoke": d.SpriteSmoke.Add(Nums(p, 2)); break;
+                        case "spriteglow": d.SpriteGlow.Add(Nums(p, 2)); break;
+                        case "spritewheel": d.SpriteWheel.Add(Nums(p, 2)); break;
+                        case "pulse": d.Pulses.Add(Nums(p)); break;
+                        case "glassdrops": d.GlassDrops.Add(Nums(p)); break;
+                        case "water": d.Water.Add(Nums(p)); break;
+                        case "curtain": d.Curtains.Add(Nums(p)); break;
+                        case "satellite": d.SatelliteEvery = F(p[1]); break;
+                        case "debris": d.DebrisEvery = F(p[1]); break;
+                        case "astronaut": d.AstronautEvery = F(p[1]); break;
+                        case "plane": d.PlaneEvery = F(p[1]); break;
+                        case "shots": d.ShotEvery = F(p[1]); break;
+                        case "nodawn": d.NoDawn = true; break;
+                        case "dawn": d.DawnFile = p[1]; break;
+                        case "dawnfront": d.DawnFront = p[1]; break;
+                        case "fall": d.Falls.Add(Nums(p)); break;
+                        case "sway": d.Sways.Add(p); break;
                         case "star": d.Stars.Add(Nums(p)); break;
                         case "light": d.Lights.Add(Nums(p)); break;
                         case "shimmer": d.Shimmers.Add(Nums(p)); break;
                         case "ripple": d.Ripples.Add(Nums(p)); break;
-                        case "window": { float[] n = Nums(p); d.Window = new RectangleF(n[0], n[1], n[2], n[3]); break; }
+                        case "window": d.Windows.Add(Nums(p)); break;
+                        case "smoke": d.Smokes.Add(Nums(p)); break;
+                        case "waves": d.Waves.Add(Nums(p)); break;
+                        case "bird": d.Birds.Add(Nums(p)); break;
+                        case "bob": d.Bobs.Add(Nums(p)); break;
+                        case "sand": d.Sands.Add(Nums(p)); break;
+                        case "toggle": d.Toggles.Add(Nums(p)); break;
+                        case "beacon": d.Beacons.Add(Nums(p)); break;
+                        case "puddle": d.Puddles.Add(Nums(p)); break;
+                        case "fireflies": d.Fireflies.Add(Nums(p)); break;
+                        case "layer": d.Layers.Add(p); break;
+                        case "reflect": d.Reflects.Add(p); break;
+                        case "front": d.FrontFile = p[1]; break;
+                        case "fade": case "fadeafter": d.Fades.Add(p); break;
                         case "skyline":
                             for (int i = 1; i < p.Length; i++)
                             {
                                 string[] xy = p[i].Split(',');
-                                d.Skyline.Add(new PointF(float.Parse(xy[0], CultureInfo.InvariantCulture), float.Parse(xy[1], CultureInfo.InvariantCulture)));
+                                d.Skyline.Add(new PointF(F(xy[0]), F(xy[1])));
                             }
                             break;
                     }
@@ -274,11 +348,1055 @@ namespace NightfallMoonClock
             catch { return null; }
         }
 
-        static float[] Nums(string[] p)
+        static float F(string s) { return float.Parse(s, CultureInfo.InvariantCulture); }
+        static float[] Nums(string[] p) { return Nums(p, 1); }
+        static float[] Nums(string[] p, int from)
         {
-            float[] n = new float[p.Length - 1];
-            for (int i = 1; i < p.Length; i++) n[i - 1] = float.Parse(p[i], CultureInfo.InvariantCulture);
+            float[] n = new float[p.Length - from];
+            for (int i = from; i < p.Length; i++) n[i - from] = F(p[i]);
             return n;
+        }
+    }
+
+    // Soft round glows (bright centre fading smoothly to nothing), cached by colour and strength.
+    static class GlowSprite
+    {
+        static readonly Dictionary<int, Bitmap> cache = new Dictionary<int, Bitmap>();
+        public static void Draw(Graphics g, float x, float y, float radius, int r, int gr, int b, float strength)
+        {
+            if (strength <= 0.01f || radius < 0.5f) return;
+            int level = Math.Max(1, Math.Min(16, (int)Math.Round(strength * 16)));
+            int key = (r << 16) ^ (gr << 8) ^ b ^ (level << 24);
+            Bitmap bmp;
+            if (!cache.TryGetValue(key, out bmp))
+            {
+                const int N = 64;
+                bmp = new Bitmap(N, N, PixelFormat.Format32bppArgb);
+                for (int yy = 0; yy < N; yy++)
+                    for (int xx = 0; xx < N; xx++)
+                    {
+                        double dx = (xx + 0.5 - N / 2.0) / (N / 2.0), dy = (yy + 0.5 - N / 2.0) / (N / 2.0);
+                        double dd = Math.Sqrt(dx * dx + dy * dy);
+                        double a = dd >= 1 ? 0 : Math.Pow(1 - dd, 2.2) * level / 16.0;
+                        bmp.SetPixel(xx, yy, Color.FromArgb(Alpha.Clamp(a * 255), r, gr, b));
+                    }
+                if (cache.Count > 400) cache.Clear();
+                cache[key] = bmp;
+            }
+            g.DrawImage(bmp, x - radius, y - radius, radius * 2, radius * 2);
+        }
+    }
+
+    // When the sun rises and sets, worked out from the date and where you are (no internet needed).
+    static class SunClock
+    {
+        public static void Times(double lat, double lon, DateTime day, out DateTime rise, out DateTime set)
+        {
+            double n = day.DayOfYear, rad = Math.PI / 180;
+            double decl = -23.44 * Math.Cos(2 * Math.PI / 365 * (n + 10)) * rad;
+            double cosH = (Math.Cos(90.833 * rad) - Math.Sin(lat * rad) * Math.Sin(decl)) / (Math.Cos(lat * rad) * Math.Cos(decl));
+            cosH = Math.Max(-1, Math.Min(1, cosH));
+            double h = Math.Acos(cosH) / rad / 15;   // hours from solar noon
+            double b = 2 * Math.PI * (n - 81) / 364;
+            double eot = (9.87 * Math.Sin(2 * b) - 7.53 * Math.Cos(b) - 1.5 * Math.Sin(b)) / 60;   // equation of time, hours
+            double tz = TimeZoneInfo.Local.GetUtcOffset(day).TotalHours;
+            double noon = 12 - lon / 15 - eot + tz;
+            rise = day.Date.AddHours(noon - h); set = day.Date.AddHours(noon + h);
+        }
+
+        // 0 = night, 1 = full dawn colours
+        public static float DawnAmount(Settings s, DateTime now)
+        {
+            string mode = s != null ? s.TimeOfDay : "sunrise";
+            if (mode == "night") return 0;
+            if (mode == "dawn") return 1;
+            double lat = s != null && !double.IsNaN(s.Lat) ? s.Lat : 23, lon = s != null && !double.IsNaN(s.Lon) ? s.Lon : TimeZoneInfo.Local.GetUtcOffset(now).TotalHours * 15;
+            DateTime rise, set;
+            Times(lat, lon, now, out rise, out set);
+            float f = Bump((now - rise).TotalMinutes, -80, -20, 45, 110);
+            if (mode == "both") f = Math.Max(f, Bump((now - set).TotalMinutes, -100, -35, 20, 70));
+            return f;
+        }
+
+        static float Bump(double m, double a, double b, double c, double d)
+        {
+            if (m <= a || m >= d) return 0;
+            double f = m < b ? (m - a) / (b - a) : m <= c ? 1 : (d - m) / (d - c);
+            return (float)(f * f * (3 - 2 * f));
+        }
+    }
+
+    // Draws and animates a scene. Used by the away-mode sky and the live wallpaper.
+    class SceneRenderer : IDisposable
+    {
+        class Drift { public Bitmap Bmp; public float Y, Speed; public bool AfterFront; }
+        // frames that slowly crossfade into each other in place (used for the aurora)
+        class Fade { public List<Bitmap> Frames = new List<Bitmap>(); public Bitmap Mix; public float Y, Period; public bool AfterFront; public double LastMix = -1e9; }
+        readonly List<Fade> fades = new List<Fade>();
+        class Part { public float X, Y, VX, VY, Size, Age, Life, Seed; public int Kind; }   // 0 smoke, 1 sand, 2 puddle ripple
+
+        SceneData d;
+        int w, h;
+        float sc, ox, oy, ui;
+        readonly Random rng = new Random();
+        Bitmap bg, front;
+        Point frontAt;
+        readonly List<Drift> drifts = new List<Drift>();
+        GraphicsPath skyClip;
+        Region skyRegion;
+        readonly List<float[]> twinkles = new List<float[]>();   // x, y, r, phase, speed
+        float[] phase;
+        readonly List<Part> parts = new List<Part>();
+        readonly List<float[]> streaks = new List<float[]>();    // x, y, vx, vy, start, duration, tail, width
+        float[] dx, dy, dlen, dspeed, dph, dr;
+        int dropKind;                                            // 0 none, 1 rain, 2 snow
+        bool[] toggleOn; double[] toggleNext;
+        float[] bx, by, bv, bph; RectangleF[] birdBox;
+        float[] fx, fy, fvx, fvy, fph; RectangleF[] ffBox;
+        double nextShot, shimmerStart = -1e9, lastSmoke, lastSand, lastPuddle;
+        readonly SolidBrush brush = new SolidBrush(Color.White);
+        readonly Pen pen = new Pen(Color.White, 1);
+
+        public bool AllowShootingStars = true;
+        // dawn: a second painting blended in around sunrise
+        Bitmap bgDawn, bgMix, frontDawn, frontMix; float dawnAmt, dawnTarget, mixedAt = -1;
+        public bool HasDawn { get { return bgDawn != null; } }
+        public float DawnShown { get { return dawnAmt; } }
+        const float DawnFadeSeconds = 8f;
+
+        // The colours always ease toward where they should be. Real sunrise changes are much slower than this,
+        // so it only shows when the scene was frozen (windows open) and has catching up to do.
+        public void SetDawn(float f) { SetDawn(f, false); }
+        public void SetDawn(float f, bool immediate)
+        {
+            dawnTarget = HasDawn ? Math.Max(0, Math.Min(1, f)) : 0;
+            if (immediate) { dawnAmt = dawnTarget; Reblend(true); }
+        }
+        void EaseDawn(float dt)
+        {
+            if (dawnAmt == dawnTarget) return;
+            float stepBy = dt / DawnFadeSeconds;
+            dawnAmt = Math.Abs(dawnTarget - dawnAmt) <= stepBy ? dawnTarget : dawnAmt + Math.Sign(dawnTarget - dawnAmt) * stepBy;
+            Reblend(dawnAmt == dawnTarget);
+        }
+        void Reblend(bool force)
+        {
+            if (!force && Math.Abs(dawnAmt - mixedAt) < 0.03f) return;   // re-blend in small steps, not every frame
+            mixedAt = dawnAmt;
+            Blend(bg, bgDawn, ref bgMix);
+            if (front != null && frontDawn != null) Blend(front, frontDawn, ref frontMix);
+        }
+        void Blend(Bitmap a, Bitmap b, ref Bitmap mix)
+        {
+            if (a == null || b == null) return;
+            if (mix == null) mix = new Bitmap(a.Width, a.Height, PixelFormat.Format32bppPArgb);
+            using (Graphics g = Graphics.FromImage(mix))
+            {
+                g.CompositingMode = CompositingMode.SourceCopy; g.DrawImageUnscaled(a, 0, 0);
+                g.CompositingMode = CompositingMode.SourceOver;
+                ColorMatrix cm = new ColorMatrix(); cm.Matrix33 = dawnAmt;
+                using (ImageAttributes ia = new ImageAttributes()) { ia.SetColorMatrix(cm); g.DrawImage(b, new Rectangle(0, 0, b.Width, b.Height), 0, 0, b.Width, b.Height, GraphicsUnit.Pixel, ia); }
+            }
+        }
+        Bitmap CurrentBg { get { return dawnAmt <= 0.01f || bgMix == null ? bg : dawnAmt >= 0.99f ? bgDawn : bgMix; } }
+        Bitmap CurrentFront { get { return frontDawn == null || dawnAmt <= 0.01f || frontMix == null ? front : dawnAmt >= 0.99f ? frontDawn : frontMix; } }
+        // falling water and swaying layers
+        class FallStreak { public int Fall; public float T, Off, Speed, Len; }
+        readonly List<FallStreak> fallStreaks = new List<FallStreak>();
+        class Sway { public Bitmap Bmp; public float Y, Amp; }
+        readonly List<Sway> sways = new List<Sway>();
+        // interactions and options
+        public bool ClickStars = true, ClickLights = true, ClickWater = true, Parallax = true;
+        public float TrainGapSeconds = -1;   // -1 = scene default, 0 = always looping
+        float parX, parY, parTX, parTY;
+        bool[] lightOff, windowOff;
+        class Sprite { public Bitmap Bmp; public float Y, Speed, Gap, X, CropY; public bool Active; public double Next; }
+        Sprite train;
+        float[] gx, gy, gv, gph; RectangleF[] gBox;
+        double nextSat, nextDebris, nextAstro, nextPlane;
+        readonly List<float[]> movers = new List<float[]>();   // kind, x, y, vx, vy, start, life, spin
+        public float ClockTop { get { return d != null ? d.ClockTop : -1; } }
+
+        PointF M(float x, float y) { return new PointF(ox + x * sc, oy + y * sc); }
+
+        public void Build(SceneData data, int width, int height, float uiScale)
+        {
+            d = data; w = width; h = height; ui = uiScale;
+            sc = Math.Max(w / (float)d.Background.Width, h / (float)d.Background.Height) * 1.02f;
+            ox = (w - d.Background.Width * sc) / 2; oy = (h - d.Background.Height * sc) / 2;
+            bg = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
+            using (Graphics g = Graphics.FromImage(bg))
+            {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.DrawImage(d.Background, ox, oy, d.Background.Width * sc, d.Background.Height * sc);
+            }
+            if (d.DawnFile != null && !d.NoDawn)
+            {
+                string df = Path.Combine(d.Dir, d.DawnFile);
+                if (File.Exists(df))
+                    using (Image di = Image.FromFile(df))
+                    {
+                        bgDawn = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
+                        using (Graphics g = Graphics.FromImage(bgDawn)) { g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.DrawImage(di, ox, oy, d.Background.Width * sc, d.Background.Height * sc); }
+                    }
+            }
+            d.Background.Dispose(); d.Background = null;   // only the screen-sized copy is needed from here on
+            foreach (string[] L in d.Layers) AddDrift(L[1], F(L[2]), F(L[3]), false);
+            foreach (string[] L in d.Reflects) AddDrift(L[1], F(L[2]), F(L[3]), true);
+            foreach (string[] L in d.Fades)
+            {
+                Fade fd = new Fade(); fd.AfterFront = L[0] == "fadeafter"; fd.Period = F(L[3]);
+                int top = int.MaxValue; List<Bitmap> raw = new List<Bitmap>(); List<Rectangle> crops = new List<Rectangle>();
+                foreach (string file in L[1].Split(','))
+                {
+                    Rectangle crop; Bitmap b = LoadCropped(Path.Combine(d.Dir, file), out crop);
+                    if (b == null) continue;
+                    raw.Add(b); crops.Add(crop); top = Math.Min(top, crop.Y);
+                }
+                if (raw.Count == 0) continue;
+                int bottom = 0; foreach (Rectangle c in crops) bottom = Math.Max(bottom, c.Bottom);
+                int fw = (int)Math.Ceiling(raw[0].Width * sc), fh = (int)Math.Ceiling((bottom - top) * sc);
+                for (int i = 0; i < raw.Count; i++)
+                {
+                    Bitmap fb = new Bitmap(fw, fh, PixelFormat.Format32bppPArgb);
+                    using (Graphics g = Graphics.FromImage(fb))
+                    {
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.DrawImage(raw[i], 0, (crops[i].Y - top) * sc, raw[i].Width * sc, raw[i].Height * sc);
+                    }
+                    fd.Frames.Add(fb); raw[i].Dispose();
+                }
+                fd.Mix = new Bitmap(fw, fh, PixelFormat.Format32bppPArgb);
+                fd.Y = oy + (F(L[2]) + top) * sc;
+                fades.Add(fd);
+            }
+            if (d.FrontFile != null)
+            {
+                Rectangle crop;
+                using (Bitmap raw = LoadCropped(Path.Combine(d.Dir, d.FrontFile), out crop))
+                    if (raw != null)
+                    {
+                        front = Scale(raw, raw.Width * sc, raw.Height * sc);
+                        frontAt = Point.Round(M(crop.X, crop.Y));
+                        if (d.DawnFront != null)
+                        {
+                            Rectangle c2;
+                            using (Bitmap rd = LoadCropped(Path.Combine(d.Dir, d.DawnFront), out c2))
+                                if (rd != null && c2.Y == crop.Y && rd.Height == raw.Height) frontDawn = Scale(rd, rd.Width * sc, rd.Height * sc);
+                        }
+                    }
+            }
+            skyClip = new GraphicsPath();
+            List<PointF> pts = new List<PointF>();
+            pts.Add(new PointF(0, 0));
+            foreach (PointF p in d.Skyline) { PointF q = M(p.X, p.Y); pts.Add(new PointF(Math.Max(0, Math.Min(w, q.X)), Math.Max(0, Math.Min(h, q.Y)))); }
+            if (pts.Count < 2) pts.Add(new PointF(w, h * 0.5f));
+            pts.Add(new PointF(w, pts[pts.Count - 1].Y));
+            pts.Add(new PointF(w, 0));
+            skyClip.AddPolygon(pts.ToArray());
+            skyRegion = new Region(skyClip);
+
+            foreach (float[] s in d.Stars)
+            {
+                PointF p = M(s[0], s[1]);
+                twinkles.Add(new float[] { p.X, p.Y, s[2] * ui, (float)(rng.NextDouble() * 6.28), 0.6f + (float)rng.NextDouble() * 1.2f });
+            }
+            phase = new float[512];
+            for (int i = 0; i < phase.Length; i++) phase[i] = (float)(rng.NextDouble() * Math.PI * 2);
+
+            // rain or snow
+            float area = w * h;
+            int n = 0;
+            if (d.Rain != "none") { dropKind = 1; n = (int)(area / (d.Rain == "heavy" ? 6000f : 12000f)); }
+            else if (d.Snow != "none") { dropKind = 2; n = (int)(area / (d.Snow == "heavy" ? 3500f : 6000f)); }
+            dx = new float[n]; dy = new float[n]; dlen = new float[n]; dspeed = new float[n]; dph = new float[n]; dr = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                dx[i] = (float)rng.NextDouble() * w; dy[i] = (float)rng.NextDouble() * h;
+                dlen[i] = (10 + (float)rng.NextDouble() * 10) * ui;
+                dspeed[i] = dropKind == 1 ? (650 + (float)rng.NextDouble() * 350) * ui : (22 + (float)rng.NextDouble() * 40) * ui;
+                dph[i] = (float)rng.NextDouble() * 6; dr[i] = (1 + (float)rng.NextDouble() * 1.8f) * ui;
+            }
+
+            toggleOn = new bool[d.Toggles.Count]; toggleNext = new double[d.Toggles.Count];
+            for (int i = 0; i < d.Toggles.Count; i++) { toggleOn[i] = d.Toggles[i][10] > 0; toggleNext[i] = 2000 + rng.NextDouble() * 18000; }
+
+            int nb = 0; foreach (float[] b in d.Birds) nb += (int)b[4];
+            bx = new float[nb]; by = new float[nb]; bv = new float[nb]; bph = new float[nb]; birdBox = new RectangleF[nb];
+            int k = 0;
+            foreach (float[] b in d.Birds)
+            {
+                PointF a = M(b[0], b[1]), c = M(b[2], b[3]);
+                for (int i = 0; i < (int)b[4]; i++, k++)
+                {
+                    birdBox[k] = RectangleF.FromLTRB(a.X, a.Y, c.X, c.Y);
+                    bx[k] = a.X + (float)rng.NextDouble() * (c.X - a.X); by[k] = a.Y + (float)rng.NextDouble() * (c.Y - a.Y);
+                    bv[k] = (18 + (float)rng.NextDouble() * 22) * ui * (rng.NextDouble() < 0.5 ? -1 : 1); bph[k] = (float)rng.NextDouble() * 6;
+                }
+            }
+            int nf = 0; foreach (float[] f in d.Fireflies) nf += (int)f[4];
+            fx = new float[nf]; fy = new float[nf]; fvx = new float[nf]; fvy = new float[nf]; fph = new float[nf]; ffBox = new RectangleF[nf];
+            k = 0;
+            foreach (float[] f in d.Fireflies)
+            {
+                PointF a = M(f[0], f[1]), c = M(f[2], f[3]);
+                for (int i = 0; i < (int)f[4]; i++, k++)
+                {
+                    ffBox[k] = RectangleF.FromLTRB(a.X, a.Y, c.X, c.Y);
+                    fx[k] = a.X + (float)rng.NextDouble() * (c.X - a.X); fy[k] = a.Y + (float)rng.NextDouble() * (c.Y - a.Y);
+                    fph[k] = (float)rng.NextDouble() * 6;
+                }
+            }
+            nextShot = 4000 + rng.Next(6000);
+            lightOff = new bool[d.Lights.Count]; windowOff = new bool[d.Windows.Count];
+            for (int i = 0; i < d.Pulses.Count; i++) { float[] pl = d.Pulses[i]; float[] n2 = new float[7]; Array.Copy(pl, n2, Math.Min(pl.Length, 5)); float a = pl.Length > 5 ? pl[5] : 80; n2[5] = a; n2[6] = a; d.Pulses[i] = n2; }   // x, y, r, g, b, current strength, original strength
+            foreach (string[] sp in d.Sprites)
+            {
+                Rectangle crop;
+                using (Bitmap raw = LoadCropped(Path.Combine(d.Dir, sp[2]), out crop))
+                    if (raw != null)
+                    {
+                        train = new Sprite();
+                        train.Bmp = Scale(raw, raw.Width * sc, raw.Height * sc);
+                        train.Y = oy + (F(sp[3]) + crop.Y) * sc; train.CropY = crop.Y; train.Speed = F(sp[4]); train.Gap = F(sp[5]);
+                        train.Next = 1500;
+                    }
+            }
+            int ng = 0; foreach (float[] gd in d.GlassDrops) ng += (int)gd[4];
+            gx = new float[ng]; gy = new float[ng]; gv = new float[ng]; gph = new float[ng]; gBox = new RectangleF[ng];
+            k = 0;
+            foreach (float[] gd in d.GlassDrops)
+            {
+                PointF a = M(gd[0], gd[1]), c = M(gd[2], gd[3]);
+                for (int i = 0; i < (int)gd[4]; i++, k++)
+                {
+                    gBox[k] = RectangleF.FromLTRB(a.X, a.Y, c.X, c.Y);
+                    gx[k] = a.X + (float)rng.NextDouble() * (c.X - a.X); gy[k] = a.Y + (float)rng.NextDouble() * (c.Y - a.Y);
+                    gv[k] = 0; gph[k] = (float)rng.NextDouble() * 6;
+                }
+            }
+            nextSat = 3000 + rng.NextDouble() * 4000; nextDebris = 12000 + rng.NextDouble() * 10000; nextAstro = 20000 + rng.NextDouble() * 20000;
+            nextPlane = 5000 + rng.NextDouble() * 8000;
+            for (int fi = 0; fi < d.Falls.Count; fi++)
+            {
+                int nStreaks = Math.Max(6, (int)(d.Falls[fi][4] * 0.35f));
+                for (int i = 0; i < nStreaks; i++) { FallStreak st = new FallStreak(); st.Fall = fi; st.T = (float)rng.NextDouble(); st.Off = (float)(rng.NextDouble() - 0.5); st.Speed = 0.45f + (float)rng.NextDouble() * 0.35f; st.Len = 0.12f + (float)rng.NextDouble() * 0.18f; fallStreaks.Add(st); }
+            }
+            foreach (string[] sw in d.Sways)
+            {
+                Rectangle crop;
+                using (Bitmap raw = LoadCropped(Path.Combine(d.Dir, sw[1]), out crop))
+                    if (raw != null) { Sway sy = new Sway(); sy.Bmp = Scale(raw, raw.Width * sc, raw.Height * sc); sy.Y = oy + (F(sw[2]) + crop.Y) * sc; sy.Amp = F(sw[3]); sways.Add(sy); }
+            }
+            SetDawn(0, true);
+        }
+
+        static float F(string s) { return float.Parse(s, CultureInfo.InvariantCulture); }
+
+        static Bitmap Scale(Bitmap src, float nw, float nh)
+        {
+            Bitmap b = new Bitmap(Math.Max(1, (int)Math.Ceiling(nw)), Math.Max(1, (int)Math.Ceiling(nh)), PixelFormat.Format32bppPArgb);
+            using (Graphics g = Graphics.FromImage(b))
+            {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.DrawImage(src, 0, 0, nw, nh);
+            }
+            return b;
+        }
+
+        // loads a transparent layer and trims empty rows above and below, so drawing it each frame is cheaper
+        static Bitmap LoadCropped(string path, out Rectangle crop)
+        {
+            crop = Rectangle.Empty;
+            if (!File.Exists(path)) return null;
+            using (Image im = Image.FromFile(path))
+            using (Bitmap full = new Bitmap(im))
+            {
+                int top = 0, bottom = full.Height - 1;
+                BitmapData bd = full.LockBits(new Rectangle(0, 0, full.Width, full.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                int[] px = new int[full.Width * full.Height];
+                Marshal.Copy(bd.Scan0, px, 0, px.Length);
+                full.UnlockBits(bd);
+                Func<int, bool> rowEmpty = delegate(int y) { for (int x = 0; x < full.Width; x += 2) if (((px[y * full.Width + x] >> 24) & 255) > 4) return false; return true; };
+                while (top < bottom && rowEmpty(top)) top++;
+                while (bottom > top && rowEmpty(bottom)) bottom--;
+                crop = new Rectangle(0, top, full.Width, bottom - top + 1);
+                return full.Clone(crop, PixelFormat.Format32bppArgb);
+            }
+        }
+
+        void AddDrift(string file, float y, float speed, bool afterFront)
+        {
+            Rectangle crop;
+            using (Bitmap raw = LoadCropped(Path.Combine(d.Dir, file), out crop))
+            {
+                if (raw == null) return;
+                Drift dr = new Drift();
+                dr.Bmp = Scale(raw, raw.Width * sc, raw.Height * sc);
+                dr.Y = oy + (y + crop.Y) * sc; dr.Speed = speed; dr.AfterFront = afterFront;
+                drifts.Add(dr);
+            }
+        }
+
+        // mouse position as -1..1 across the screen; the scene shifts a little the other way
+        public void SetPointer(float nx, float ny) { if (Parallax) { parTX = -nx * 12 * ui; parTY = -ny * 7 * ui; } else { parTX = parTY = 0; } }
+
+        // a click at screen coordinates; returns true when it did something
+        public bool Click(float x, float y, double t)
+        {
+            x -= parX; y -= parY;
+            if (ClickLights)
+            {
+                for (int i = 0; i < d.Toggles.Count; i++)
+                {
+                    float[] T = d.Toggles[i]; PointF p = M(T[0], T[1]);
+                    RectangleF r = new RectangleF(p.X - 6, p.Y - 6, T[2] * sc + 12, T[3] * sc + 12);
+                    if (r.Contains(x, y)) { toggleOn[i] = !toggleOn[i]; toggleNext[i] = t + 30000 + rng.NextDouble() * 30000; return true; }
+                }
+                for (int i = 0; i < d.Windows.Count; i++)
+                {
+                    float[] Wn = d.Windows[i]; PointF p = M(Wn[0], Wn[1]);
+                    if (new RectangleF(p.X - 10, p.Y - 10, Wn[2] * sc + 20, Wn[3] * sc + 20).Contains(x, y)) { windowOff[i] = !windowOff[i]; return true; }
+                }
+                for (int i = 0; i < d.Lights.Count; i++)
+                {
+                    PointF p = M(d.Lights[i][0], d.Lights[i][1]);
+                    if (Math.Abs(p.X - x) < 18 * ui && Math.Abs(p.Y - y) < 18 * ui) { lightOff[i] = !lightOff[i]; return true; }
+                }
+                foreach (float[] pl in d.Pulses)
+                {
+                    PointF p = M(pl[0], pl[1]);
+                    if (Math.Abs(p.X - x) < 60 * ui && Math.Abs(p.Y - y) < 60 * ui) { pl[5] = pl[5] > 0 ? 0 : pl[6]; return true; }
+                }
+            }
+            if (ClickWater)
+                foreach (float[] pd in d.Puddles)   // puddles ripple too
+                {
+                    PointF c = M(pd[0], pd[1]); float rw = pd[2] * sc;
+                    if (Math.Abs(x - c.X) < rw && Math.Abs(y - c.Y) < rw * 0.3f)
+                    {
+                        for (int k2 = 0; k2 < 2; k2++) { Part q = new Part(); q.Kind = 2; q.X = x; q.Y = y; q.Size = rw * (0.5f + k2 * 0.3f); q.Life = 1.2f; q.Age = -k2 * 0.2f; parts.Add(q); }
+                        return true;
+                    }
+                }
+            if (ClickWater)
+                foreach (float[] wr in d.Water)
+                {
+                    PointF a = M(wr[0], wr[1]), c = M(wr[2], wr[3]);
+                    if (RectangleF.FromLTRB(a.X, a.Y, c.X, c.Y).Contains(x, y))
+                    {
+                        for (int k = 0; k < 3; k++) { Part q = new Part(); q.Kind = 3; q.X = x; q.Y = y; q.Size = (40 + k * 25) * ui; q.Life = 1.6f + k * 0.4f; q.Age = -k * 0.25f; parts.Add(q); }
+                        return true;
+                    }
+                }
+            if (ClickStars && !d.NoShoot && skyClip != null && skyClip.IsVisible(x, y))
+            {
+                float vx = -(260 + (float)rng.NextDouble() * 160) * ui, vy = (100 + (float)rng.NextDouble() * 60) * ui;
+                streaks.Add(new float[] { x, y, vx, vy, (float)t, 900, 0.28f, 1.6f });
+                return true;
+            }
+            return false;
+        }
+
+        public void Shimmer(double t) { shimmerStart = t; for (int i = 0; i < 4; i++) AddStreak(t + 500 + i * 450, false); }
+
+        public void StartShower(double t)
+        {
+            if (d.NoShoot) return;
+            for (int i = 0; i < 12; i++) AddStreak(t + rng.NextDouble() * 3000, true);
+        }
+
+        void AddStreak(double start, bool shower)
+        {
+            if (d.NoShoot) return;
+            float x = w * (0.35f + (float)rng.NextDouble() * 0.6f), y = h * (0.04f + (float)rng.NextDouble() * 0.13f);
+            float vx = -(240 + (float)rng.NextDouble() * 180) * ui, vy = (90 + (float)rng.NextDouble() * 70) * ui;
+            if (shower) { double a = 0.3 + rng.NextDouble() * 2.5; float s = (240 + (float)rng.NextDouble() * 200) * ui; vx = (float)Math.Cos(a) * s; vy = Math.Abs((float)Math.Sin(a)) * s; }
+            streaks.Add(new float[] { x, y, vx, vy, (float)start, 800 + (float)rng.NextDouble() * 400, 0.28f, 1.4f });
+        }
+
+        public void Step(double t, double dt)
+        {
+            float fdt = (float)dt;
+            EaseDawn(fdt);
+            // rain and snow
+            for (int i = 0; i < dx.Length; i++)
+            {
+                dy[i] += dspeed[i] * fdt;
+                if (dropKind == 1) dx[i] -= dspeed[i] * fdt * 0.12f;
+                else dx[i] += (float)Math.Sin(t / 1200 + dph[i]) * 14 * ui * fdt;
+                if (dy[i] > h) { dy[i] = -dlen[i]; dx[i] = (float)rng.NextDouble() * w * 1.1f; }
+            }
+            // chimney smoke and steam
+            if (d.Smokes.Count > 0 && t - lastSmoke > 240)
+            {
+                lastSmoke = t;
+                foreach (float[] s in d.Smokes)
+                {
+                    PointF p = M(s[0], s[1]);
+                    Part q = new Part();
+                    q.Kind = 0; q.X = p.X + (float)(rng.NextDouble() - 0.5) * 4 * ui; q.Y = p.Y;
+                    q.VX = s[3] * ui * (0.6f + (float)rng.NextDouble() * 0.8f); q.VY = -(16 + (float)rng.NextDouble() * 12) * ui;
+                    q.Size = s[2] * sc * (0.8f + (float)rng.NextDouble() * 0.4f); q.Life = 5 + (float)rng.NextDouble() * 2; q.Seed = (float)rng.NextDouble() * 6;
+                    parts.Add(q);
+                }
+            }
+            // sand blowing off dune crests
+            if (d.Sands.Count > 0 && t - lastSand > 90)
+            {
+                lastSand = t;
+                float[] s = d.Sands[rng.Next(d.Sands.Count)];
+                PointF p = M(s[0], s[1]);
+                for (int i = 0; i < 3; i++)
+                {
+                    Part q = new Part();
+                    q.Kind = 1; q.X = p.X + (float)rng.NextDouble() * 30 * ui; q.Y = p.Y - (float)rng.NextDouble() * 3 * ui;
+                    q.VX = (22 + (float)rng.NextDouble() * 26) * ui; q.VY = -(3 + (float)rng.NextDouble() * 8) * ui;
+                    q.Size = (0.8f + (float)rng.NextDouble() * 1.2f) * ui; q.Life = 2 + (float)rng.NextDouble() * 2;
+                    parts.Add(q);
+                }
+            }
+            // raindrops landing in puddles
+            if (d.Puddles.Count > 0 && t - lastPuddle > 260)
+            {
+                lastPuddle = t;
+                float[] s = d.Puddles[rng.Next(d.Puddles.Count)];
+                PointF p = M(s[0] + (float)(rng.NextDouble() - 0.5) * s[2], s[1]);
+                Part q = new Part(); q.Kind = 2; q.X = p.X; q.Y = p.Y; q.Size = s[2] * sc * 0.35f; q.Life = 1.1f;
+                parts.Add(q);
+            }
+            for (int i = parts.Count - 1; i >= 0; i--)
+            {
+                Part q = parts[i];
+                q.Age += fdt;
+                if (q.Age > q.Life) { parts.RemoveAt(i); continue; }
+                q.X += q.VX * fdt + (q.Kind == 0 ? (float)Math.Sin(q.Age * 1.3 + q.Seed) * 5 * ui * fdt : 0);
+                q.Y += q.VY * fdt;
+            }
+            // office windows switching on and off
+            for (int i = 0; i < toggleOn.Length; i++)
+                if (t > toggleNext[i]) { toggleOn[i] = !toggleOn[i]; toggleNext[i] = t + 4000 + rng.NextDouble() * 22000; }
+            // birds gliding
+            for (int i = 0; i < bx.Length; i++)
+            {
+                bx[i] += bv[i] * fdt; by[i] += (float)Math.Sin(t / 1500 + bph[i]) * 4 * ui * fdt;
+                RectangleF r = birdBox[i];
+                if (bx[i] < r.Left - 40 * ui) bx[i] = r.Right + 30 * ui;
+                if (bx[i] > r.Right + 40 * ui) bx[i] = r.Left - 30 * ui;
+            }
+            // fireflies wandering
+            for (int i = 0; i < fx.Length; i++)
+            {
+                fvx[i] += (float)(rng.NextDouble() - 0.5) * 40 * ui * fdt; fvy[i] += (float)(rng.NextDouble() - 0.5) * 40 * ui * fdt;
+                float lim = 18 * ui;
+                fvx[i] = Math.Max(-lim, Math.Min(lim, fvx[i])); fvy[i] = Math.Max(-lim, Math.Min(lim, fvy[i]));
+                fx[i] += fvx[i] * fdt; fy[i] += fvy[i] * fdt;
+                RectangleF r = ffBox[i];
+                if (fx[i] < r.Left || fx[i] > r.Right) fvx[i] = -fvx[i];
+                if (fy[i] < r.Top || fy[i] > r.Bottom) fvy[i] = -fvy[i];
+                fx[i] = Math.Max(r.Left, Math.Min(r.Right, fx[i])); fy[i] = Math.Max(r.Top, Math.Min(r.Bottom, fy[i]));
+            }
+            // the train crossing the viaduct
+            if (train != null)
+            {
+                float gap = TrainGapSeconds >= 0 ? TrainGapSeconds : train.Gap;
+                if (!train.Active && t >= train.Next) { train.Active = true; train.X = train.Speed < 0 ? w + 20 : -train.Bmp.Width - 20; }
+                if (train.Active)
+                {
+                    train.X += train.Speed * sc * fdt;
+                    if ((train.Speed < 0 && train.X < -train.Bmp.Width - 40) || (train.Speed > 0 && train.X > w + 40)) { train.Active = false; train.Next = t + gap * 1000; }
+                    if (t - lastSmoke > 120)
+                        foreach (float[] sm in d.SpriteSmoke)
+                        {
+                            Part q = new Part(); q.Kind = 0; q.X = train.X + sm[0] * sc; q.Y = train.Y + (sm[1] - train.CropY) * sc;
+                            q.VX = (float)(rng.NextDouble() - 0.5) * 10 * ui; q.VY = -(28 + (float)rng.NextDouble() * 20) * ui;
+                            q.Size = sm[2] * sc * (0.8f + (float)rng.NextDouble() * 0.5f); q.Life = 3.5f + (float)rng.NextDouble() * 1.5f; q.Seed = (float)rng.NextDouble() * 6;
+                            parts.Add(q);
+                        }
+                }
+            }
+            // raindrops sliding down the window glass
+            for (int i = 0; i < gx.Length; i++)
+            {
+                if (gv[i] <= 0 && rng.NextDouble() < 0.01) gv[i] = (20 + (float)rng.NextDouble() * 60) * ui;
+                gy[i] += gv[i] * fdt; gx[i] += (float)Math.Sin(t / 300 + gph[i]) * 6 * ui * fdt;
+                if (gv[i] > 0 && rng.NextDouble() < 0.02) gv[i] = 0;   // drops stop and start, like real ones
+                if (gy[i] > gBox[i].Bottom) { gy[i] = gBox[i].Top + (float)rng.NextDouble() * gBox[i].Height * 0.3f; gx[i] = gBox[i].Left + (float)rng.NextDouble() * gBox[i].Width; gv[i] = 0; }
+            }
+            // satellites, debris and the occasional astronaut
+            foreach (FallStreak st in fallStreaks) { st.T += st.Speed * fdt; if (st.T > 1 + st.Len) { st.T = -st.Len * (float)rng.NextDouble(); st.Off = (float)(rng.NextDouble() - 0.5); } }
+            if (d.PlaneEvery > 0 && t > nextPlane) { nextPlane = t + d.PlaneEvery * (0.6 + rng.NextDouble() * 0.8); bool ltr = rng.NextDouble() < 0.5; movers.Add(new float[] { 3, ltr ? -20 : w + 20, h * (0.06f + (float)rng.NextDouble() * 0.16f), (ltr ? 1 : -1) * (22 + (float)rng.NextDouble() * 14) * ui, (float)(rng.NextDouble() - 0.5f) * 3 * ui, (float)t, 200000, 0 }); }
+            if (d.SatelliteEvery > 0 && t > nextSat) { nextSat = t + d.SatelliteEvery * (0.6 + rng.NextDouble() * 0.8); bool ltr = rng.NextDouble() < 0.5; movers.Add(new float[] { 0, ltr ? -10 : w + 10, h * (0.05f + (float)rng.NextDouble() * 0.35f), (ltr ? 1 : -1) * (40 + (float)rng.NextDouble() * 40) * ui, (float)(rng.NextDouble() - 0.5f) * 12 * ui, (float)t, 60000, 0 }); }
+            if (d.DebrisEvery > 0 && t > nextDebris) { nextDebris = t + d.DebrisEvery * (0.6 + rng.NextDouble() * 0.8); bool ltr = rng.NextDouble() < 0.5; movers.Add(new float[] { 1, ltr ? -20 : w + 20, h * (0.1f + (float)rng.NextDouble() * 0.4f), (ltr ? 1 : -1) * (25 + (float)rng.NextDouble() * 25) * ui, (float)(rng.NextDouble() - 0.5f) * 8 * ui, (float)t, 90000, (float)(rng.NextDouble() * 2 - 1) }); }
+            if (d.AstronautEvery > 0 && t > nextAstro) { nextAstro = t + d.AstronautEvery * (0.7 + rng.NextDouble() * 0.6); bool ltr = rng.NextDouble() < 0.5; movers.Add(new float[] { 2, ltr ? -80 : w + 80, h * (0.2f + (float)rng.NextDouble() * 0.3f), (ltr ? 1 : -1) * (16 + (float)rng.NextDouble() * 10) * ui, (float)(rng.NextDouble() - 0.5f) * 6 * ui, (float)t, 200000, (float)(rng.NextDouble() * 0.6 - 0.3) }); }
+            for (int i = movers.Count - 1; i >= 0; i--)
+            {
+                float[] mv = movers[i]; mv[1] += mv[3] * fdt; mv[2] += mv[4] * fdt;
+                if (mv[1] < -200 || mv[1] > w + 200 || t - mv[5] > mv[6]) movers.RemoveAt(i);
+            }
+            parX += (parTX - parX) * Math.Min(1, fdt * 3); parY += (parTY - parY) * Math.Min(1, fdt * 3);
+            // shooting stars
+            if (AllowShootingStars && !d.NoShoot && dawnAmt < 0.4f && t > nextShot) { AddStreak(t, false); nextShot = t + (d.ShotEvery > 0 ? d.ShotEvery * (0.6 + rng.NextDouble() * 0.8) : 7000 + rng.Next(9000)); }
+            for (int i = streaks.Count - 1; i >= 0; i--) if (t > streaks[i][4] + streaks[i][5]) streaks.RemoveAt(i);
+        }
+
+        public void Paint(Graphics g, double t)
+        {
+            g.CompositingQuality = CompositingQuality.HighSpeed;
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            System.Drawing.Drawing2D.Matrix saved = g.Transform;
+            g.TranslateTransform(parX, parY);
+            g.DrawImageUnscaled(CurrentBg, 0, 0);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            Region old = g.Clip;
+            g.SetClip(skyRegion, CombineMode.Intersect);
+            double since = t - shimmerStart;
+            foreach (float[] s in twinkles)
+            {
+                double boost = since >= 0 && since < 7000 ? Math.Sin(Math.PI * since / 7000) * (0.5 + 0.5 * Math.Sin(t / 160 + s[3] * 3)) : 0;
+                if (dawnAmt > 0.9f) break;
+                int a = (int)(255 * (1 - dawnAmt) * Math.Min(1, 0.55 + 0.45 * Math.Sin(t / 1000 * s[4] + s[3]) + boost * 0.6));
+                brush.Color = Color.FromArgb(Math.Max(0, Math.Min(255, a)), 236, 228, 244);
+                g.FillEllipse(brush, s[0] - s[2], s[1] - s[2], s[2] * 2, s[2] * 2);
+            }
+            g.Clip = old;
+            foreach (Drift dr in drifts) if (!dr.AfterFront) DrawDrift(g, dr, t);
+            if (dawnAmt < 0.7f) foreach (Fade fd in fades) if (!fd.AfterFront) DrawFade(g, fd, t);
+            g.SetClip(skyRegion, CombineMode.Intersect);
+            DrawStreaks(g, t);
+            g.Clip = old;
+            DrawSprite(g, t);
+            DrawMovers(g, t);
+            if (d.LifeUnder) { DrawLife(g, t, 0); DrawDrops(g); }
+            DrawFalls(g, t);
+            DrawSways(g, t);
+            if (front != null) g.DrawImageUnscaled(CurrentFront, frontAt.X, frontAt.Y);
+            foreach (Drift dr in drifts) if (dr.AfterFront) DrawDrift(g, dr, t);
+            if (dawnAmt < 0.7f) foreach (Fade fd in fades) if (fd.AfterFront) DrawFade(g, fd, t);
+            if (d.LifeUnder) DrawLife(g, t, 1);
+            else { DrawLife(g, t, 2); DrawDrops(g); }
+            g.Transform = saved;
+        }
+
+        void DrawSprite(Graphics g, double t)
+        {
+            if (train == null || !train.Active) return;
+            g.DrawImageUnscaled(train.Bmp, (int)train.X, (int)train.Y);
+            foreach (float[] wl in d.SpriteWheel)   // spokes turning as it rolls
+            {
+                float cx = train.X + wl[0] * sc, cy = train.Y + (wl[1] - train.CropY) * sc, r = wl[2] * sc;
+                float ang = -train.X / Math.Max(1f, r);
+                pen.Color = Color.FromArgb(200, 70, 56, 60); pen.Width = Math.Max(1f, 2 * sc);
+                for (int k = 0; k < 3; k++) { float a = ang + k * 1.047f; g.DrawLine(pen, cx - (float)Math.Cos(a) * r * 0.85f, cy - (float)Math.Sin(a) * r * 0.85f, cx + (float)Math.Cos(a) * r * 0.85f, cy + (float)Math.Sin(a) * r * 0.85f); }
+            }
+            foreach (float[] gl in d.SpriteGlow)   // firebox and headlamp flicker
+            {
+                float cx = train.X + gl[0] * sc, cy = train.Y + (gl[1] - train.CropY) * sc, r = gl[5] * sc;
+                double f = 0.7 + 0.2 * Math.Sin(t / 90 + gl[0]) + 0.1 * Math.Sin(t / 37);
+                using (GraphicsPath gp = new GraphicsPath())
+                {
+                    gp.AddEllipse(cx - r, cy - r, r * 2, r * 2);
+                    using (PathGradientBrush pb = new PathGradientBrush(gp))
+                    {
+                        pb.CenterColor = Color.FromArgb(Alpha.Clamp(150 * f), (int)gl[2], (int)gl[3], (int)gl[4]);
+                        pb.SurroundColors = new Color[] { Color.FromArgb(0, (int)gl[2], (int)gl[3], (int)gl[4]) };
+                        g.FillPath(pb, gp);
+                    }
+                }
+            }
+        }
+
+        void DrawFalls(Graphics g, double t)
+        {
+            if (d.Falls.Count == 0) return;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            foreach (FallStreak st in fallStreaks)   // bright streaks sliding down each stream
+            {
+                float[] fl = d.Falls[st.Fall];
+                float t0 = Math.Max(0, st.T - st.Len), t1 = Math.Min(1, st.T);
+                if (t1 <= t0) continue;
+                float width = fl[4] * sc;
+                PointF a = M(fl[0] + (fl[2] - fl[0]) * t0, fl[1] + (fl[3] - fl[1]) * t0), b = M(fl[0] + (fl[2] - fl[0]) * t1, fl[1] + (fl[3] - fl[1]) * t1);
+                float off = st.Off * width * (0.8f + 0.25f * t1);
+                float al = (float)Math.Sin(Math.PI * Math.Max(0, Math.Min(1, (t0 + t1) / 2))) * (1 - Math.Abs(st.Off) * 1.2f);
+                if (al <= 0.02f) continue;
+                using (LinearGradientBrush lb = new LinearGradientBrush(new PointF(a.X + off, a.Y - 1), new PointF(b.X + off, b.Y + 1), Color.FromArgb(0, 240, 242, 255), Color.FromArgb(Alpha.Clamp(150 * al), 240, 242, 255)))
+                using (Pen p = new Pen(lb, Math.Max(1f, 1.6f * sc)))
+                    g.DrawLine(p, a.X + off, a.Y, b.X + off, b.Y);
+            }
+            for (int i = 0; i < d.Falls.Count; i++)   // foam churning where each stream lands
+            {
+                float[] fl = d.Falls[i]; PointF b = M(fl[2], fl[3]);
+                for (int k = 0; k < 3; k++)
+                {
+                    float jx = (float)Math.Sin(t / 230 + i * 3 + k * 2.1) * fl[4] * sc * 0.4f, jy = (float)Math.Sin(t / 310 + k) * 3 * sc;
+                    GlowSprite.Draw(g, b.X + jx, b.Y + jy, fl[4] * sc * 0.55f, 238, 240, 252, 0.35f + 0.15f * (float)Math.Sin(t / 400 + i + k));
+                }
+            }
+        }
+
+        void DrawSways(Graphics g, double t)
+        {
+            foreach (Sway sy in sways)   // the layer is drawn in thin rows, each nudged by a slow wave, like wind moving through grass
+            {
+                int rows = 72, bh = sy.Bmp.Height, rh = Math.Max(1, bh / rows);
+                for (int i = 0; i * rh < bh; i++)
+                {
+                    float up = 1 - (float)i / rows;   // the tops of the blades move more than the bottoms
+                    float dx = (float)(Math.Sin(t / 1500.0 + i * 0.09) * 0.6 + Math.Sin(t / 2300.0 + i * 0.05 + 1.3) * 0.4) * sy.Amp * sc * (0.25f + 0.75f * up);
+                    int hgt = Math.Min(rh, bh - i * rh);
+                    g.DrawImage(sy.Bmp, new RectangleF(ox + dx, sy.Y + i * rh, sy.Bmp.Width, hgt), new RectangleF(0, i * rh, sy.Bmp.Width, hgt), GraphicsUnit.Pixel);
+                }
+            }
+        }
+
+        void DrawMovers(Graphics g, double t)
+        {
+            foreach (float[] mv in movers)
+            {
+                float x = mv[1], y = mv[2];
+                if (mv[0] == 3)   // aircraft far away: a steady white light with a red blink
+                {
+                    GlowSprite.Draw(g, x, y, 7 * ui, 255, 250, 240, 0.7f);
+                    if ((t % 1300) < 160) GlowSprite.Draw(g, x - 6 * ui, y + 1 * ui, 9 * ui, 255, 70, 70, 0.9f);
+                    continue;
+                }
+                if (mv[0] == 0)   // satellite: a steady point with a slow glint
+                {
+                    float a = (float)(0.6 + 0.4 * Math.Pow(Math.Max(0, Math.Sin(t / 2500 + x / 300)), 8));
+                    brush.Color = Color.FromArgb(Alpha.Clamp(255 * a), 236, 236, 250); g.FillEllipse(brush, x - 1.6f * ui, y - 1.6f * ui, 3.2f * ui, 3.2f * ui);
+                }
+                else if (mv[0] == 1)   // debris: a small tumbling sliver
+                {
+                    float ang = (float)(t / 1000 * mv[7] * 2), r = 4 * ui;
+                    PointF[] pts = { new PointF(x + (float)Math.Cos(ang) * r, y + (float)Math.Sin(ang) * r), new PointF(x + (float)Math.Cos(ang + 2.3) * r * 0.6f, y + (float)Math.Sin(ang + 2.3) * r * 0.6f), new PointF(x + (float)Math.Cos(ang + 3.9) * r * 0.8f, y + (float)Math.Sin(ang + 3.9) * r * 0.8f) };
+                    brush.Color = Color.FromArgb(170, 150, 150, 170); g.FillPolygon(brush, pts);
+                }
+                else   // astronaut drifting by on a slow spin
+                {
+                    GraphicsState st = g.Save();
+                    g.TranslateTransform(x, y); g.RotateTransform((float)(t / 1000 * mv[7] * 20)); float u = 1.6f * ui;
+                    brush.Color = Color.FromArgb(255, 210, 212, 222); g.FillRectangle(brush, -9 * u, -6 * u, 9 * u, 16 * u);   // backpack
+                    brush.Color = Color.FromArgb(255, 236, 236, 244); g.FillEllipse(brush, -2 * u, -16 * u, 14 * u, 14 * u);   // helmet
+                    brush.Color = Color.FromArgb(255, 200, 150, 60); g.FillEllipse(brush, 2 * u, -13 * u, 9 * u, 8 * u);     // gold visor
+                    brush.Color = Color.FromArgb(255, 236, 236, 244); g.FillRectangle(brush, -1 * u, -3 * u, 13 * u, 16 * u); // body
+                    g.FillRectangle(brush, 10 * u, -1 * u, 9 * u, 4 * u); g.FillRectangle(brush, -1 * u, 13 * u, 5 * u, 11 * u); g.FillRectangle(brush, 7 * u, 13 * u, 5 * u, 10 * u);
+                    g.Restore(st);
+                }
+            }
+        }
+
+        void DrawFade(Graphics g, Fade fd, double t)
+        {
+            if (t - fd.LastMix > 160)   // re-blend a few times a second; the aurora changes slowly
+            {
+                fd.LastMix = t;
+                int n = fd.Frames.Count;
+                double pos = (t / 1000.0 / Math.Max(1f, fd.Period)) % n;
+                int i = (int)pos, j = (i + 1) % n;
+                float a = (float)(pos - i); a = a * a * (3 - 2 * a);   // ease in and out
+                using (Graphics mg = Graphics.FromImage(fd.Mix))
+                {
+                    mg.Clear(Color.Transparent);
+                    mg.CompositingMode = CompositingMode.SourceOver;
+                    DrawWithAlpha(mg, fd.Frames[i], 1 - a);
+                    DrawWithAlpha(mg, fd.Frames[j], a);
+                }
+            }
+            g.DrawImageUnscaled(fd.Mix, (int)ox, (int)fd.Y);
+        }
+
+        static void DrawWithAlpha(Graphics g, Bitmap b, float alpha)
+        {
+            if (alpha <= 0.01f) return;
+            if (alpha >= 0.99f) { g.DrawImageUnscaled(b, 0, 0); return; }
+            ColorMatrix cm = new ColorMatrix(); cm.Matrix33 = alpha;
+            using (ImageAttributes ia = new ImageAttributes())
+            {
+                ia.SetColorMatrix(cm);
+                g.DrawImage(b, new Rectangle(0, 0, b.Width, b.Height), 0, 0, b.Width, b.Height, GraphicsUnit.Pixel, ia);
+            }
+        }
+
+        void DrawDrift(Graphics g, Drift dr, double t)
+        {
+            int bw = dr.Bmp.Width;
+            int off = (int)((t / 1000.0 * dr.Speed * ui) % bw);
+            int x = (int)ox - off;
+            g.DrawImageUnscaled(dr.Bmp, x, (int)dr.Y);
+            if (x + bw < w) g.DrawImageUnscaled(dr.Bmp, x + bw, (int)dr.Y);
+        }
+
+        void DrawStreaks(Graphics g, double t)
+        {
+            foreach (float[] s in streaks)
+            {
+                if (t < s[4]) continue;
+                float k = (float)((t - s[4]) / s[5]);
+                float hx = s[0] + s[2] * k, hy = s[1] + s[3] * k, tx = hx - s[2] * s[6], ty = hy - s[3] * s[6];
+                if (Math.Abs(hx - tx) + Math.Abs(hy - ty) < 2) continue;
+                using (LinearGradientBrush lb = new LinearGradientBrush(new PointF(hx, hy), new PointF(tx, ty), Color.FromArgb(Alpha.Clamp(230 * Math.Sin(k * Math.PI)), 255, 255, 255), Color.FromArgb(0, 236, 228, 244)))
+                using (Pen p = new Pen(lb, s[7] * ui))
+                    g.DrawLine(p, hx, hy, tx, ty);
+            }
+        }
+
+        void DrawLife(Graphics g, double t, int phaseSel)
+        {
+            int k = 0;
+            bool outside = phaseSel != 1, inside = phaseSel != 0;
+            if (inside) DrawInside(g, t);
+            if (!outside) return;
+            for (int li = 0; li < d.Lights.Count; li++)
+            {
+                float[] L = d.Lights[li];
+                float ph = phase[k++ % phase.Length];
+                if (lightOff[li]) continue;
+                double f = 0.5 + 0.5 * Math.Sin(t / (700 + ph * 90) + ph);
+                PointF p = M(L[0], L[1]);
+                float rr = Math.Max(1f, L[2] * sc) * (1.2f + 0.4f * (float)f);
+                GlowSprite.Draw(g, p.X, p.Y, rr * 4.5f, (int)L[3], (int)L[4], (int)L[5], 0.25f + 0.3f * (float)f);
+                GlowSprite.Draw(g, p.X, p.Y, rr * 1.2f, 255, 240, 220, 0.6f + 0.4f * (float)f);
+            }
+            pen.Width = Math.Max(1f, sc);
+            foreach (float[] S in d.Shimmers)
+            {
+                float ph = phase[k++ % phase.Length];
+                double f = Math.Pow(Math.Max(0, Math.Sin(t / 650 + ph)), 3);
+                if (f < 0.03) continue;
+                PointF a = M(S[0], S[2]), c = M(S[1], S[2]);
+                float drift = (float)Math.Sin(t / 1300 + ph) * 6 * sc;
+                float mid = (a.X + c.X) / 2, half = (c.X - a.X) / 2 * (0.55f + 0.45f * (float)f);   // grows and shrinks with its brightness
+                if (half < 2) continue;
+                using (LinearGradientBrush gb = new LinearGradientBrush(new PointF(mid - half - 1, a.Y), new PointF(mid + half + 1, a.Y), Color.Transparent, Color.Transparent))
+                {
+                    ColorBlend cb = new ColorBlend(3);
+                    Color core = Color.FromArgb(Alpha.Clamp(70 * f), 232, 222, 245);
+                    cb.Colors = new Color[] { Color.FromArgb(0, core), core, Color.FromArgb(0, core) };
+                    cb.Positions = new float[] { 0, 0.5f, 1 };
+                    gb.InterpolationColors = cb;
+                    g.FillRectangle(gb, mid - half + drift, a.Y - 0.6f * sc, half * 2, Math.Max(1f, 1.2f * sc));
+                }
+            }
+            foreach (float[] R in d.Ripples)
+            {
+                float ph = phase[k++ % phase.Length];
+                double f = 0.5 + 0.5 * Math.Sin(t / 520 + ph);
+                PointF a = M(R[0], R[1]);
+                float wob = (float)Math.Sin(t / 380 + ph * 2) * 2.5f * sc;
+                float len = R[2] * sc;
+                using (LinearGradientBrush lb = new LinearGradientBrush(new PointF(a.X, a.Y - 1), new PointF(a.X, a.Y + len + 1), Color.FromArgb(0, (int)R[3], (int)R[4], (int)R[5]), Color.FromArgb(0, (int)R[3], (int)R[4], (int)R[5])))
+                {
+                    ColorBlend cb = new ColorBlend(3);
+                    cb.Colors = new Color[] { Color.FromArgb(0, (int)R[3], (int)R[4], (int)R[5]), Color.FromArgb(Alpha.Clamp(18 + 34 * f), (int)R[3], (int)R[4], (int)R[5]), Color.FromArgb(0, (int)R[3], (int)R[4], (int)R[5]) };
+                    cb.Positions = new float[] { 0, 0.45f, 1 }; lb.InterpolationColors = cb;
+                    g.FillRectangle(lb, a.X + wob - 1.2f * sc, a.Y, 2.4f * sc, len);
+                }
+            }
+            for (int wi = 0; wi < d.Windows.Count; wi++)   // firelight
+            {
+                float[] Wn = d.Windows[wi];
+                float ph = phase[k++ % phase.Length];
+                if (windowOff[wi]) { PointF po = M(Wn[0], Wn[1]); brush.Color = Color.FromArgb(255, 44, 30, 36); g.FillRectangle(brush, po.X, po.Y, Wn[2] * sc, Wn[3] * sc); continue; }
+                double f = 0.6 + 0.25 * Math.Sin(t / 230 + ph) + 0.15 * Math.Sin(t / 97 + ph * 3);
+                PointF p = M(Wn[0], Wn[1]);
+                float ww = Wn[2] * sc, hh = Wn[3] * sc;
+                using (GraphicsPath gp = new GraphicsPath())
+                {
+                    gp.AddEllipse(p.X - ww * 2.5f, p.Y - hh * 2.5f, ww * 6, hh * 6);
+                    using (PathGradientBrush pb = new PathGradientBrush(gp))
+                    {
+                        pb.CenterColor = Color.FromArgb(Alpha.Clamp(70 * f), 255, 170, 90);
+                        pb.SurroundColors = new Color[] { Color.FromArgb(0, 255, 170, 90) };
+                        g.FillPath(pb, gp);
+                    }
+                }
+                brush.Color = Color.FromArgb(Alpha.Clamp(150 + 105 * Math.Min(1, f)), 255, 196, 115);
+                g.FillRectangle(brush, p.X, p.Y, ww, hh);
+            }
+            for (int i = 0; i < d.Toggles.Count; i++)   // office windows
+            {
+                float[] T = d.Toggles[i];
+                PointF p = M(T[0], T[1]);
+                brush.Color = toggleOn[i] ? Color.FromArgb(255, (int)T[4], (int)T[5], (int)T[6]) : Color.FromArgb(255, (int)T[7], (int)T[8], (int)T[9]);
+                g.FillRectangle(brush, p.X, p.Y, T[2] * sc, T[3] * sc);
+            }
+            foreach (float[] B in d.Beacons)   // blinking red light
+            {
+                double cyc = (t + B[0] * 7) % 1800;
+                if (cyc > 260) continue;
+                float a = (float)Math.Sin(Math.PI * cyc / 260);
+                PointF p = M(B[0], B[1]);
+                float r = 6 * sc;
+                GlowSprite.Draw(g, p.X, p.Y, r * 6, 255, 60, 60, 0.45f * a);
+                GlowSprite.Draw(g, p.X, p.Y, r * 1.6f, 255, 120, 110, a);
+            }
+            foreach (Part q in parts)
+            {
+                float life = q.Age / q.Life;
+                if (q.Kind == 0 && d.LifeUnder) continue;   // drawn in the inside pass
+                if (q.Kind == 0)   // smoke
+                {
+                    float s = q.Size * (1 + q.Age * 0.55f);
+                    brush.Color = Color.FromArgb(Alpha.Clamp(55 * (1 - life) * Math.Min(1, q.Age * 2)), 196, 186, 214);
+                    g.FillEllipse(brush, q.X - s, q.Y - s * 0.8f, s * 2, s * 1.6f);
+                }
+                else if (q.Kind == 1)   // sand
+                {
+                    brush.Color = Color.FromArgb(Alpha.Clamp(120 * (1 - life)), 214, 170, 170);
+                    g.FillEllipse(brush, q.X - q.Size, q.Y - q.Size, q.Size * 2, q.Size * 2);
+                }
+                else if (q.Kind == 3)   // ripple from a click on water
+                {
+                    if (q.Age < 0) continue;
+                    float s3 = q.Size * (0.2f + life * 1.4f);
+                    pen.Color = Color.FromArgb(Alpha.Clamp(150 * (1 - life)), 230, 222, 245); pen.Width = Math.Max(1f, 1.5f * ui);
+                    g.DrawEllipse(pen, q.X - s3, q.Y - s3 * 0.3f, s3 * 2, s3 * 0.6f);
+                }
+                else   // puddle ripple
+                {
+                    if (q.Age < 0) continue;
+                    float s = q.Size * (0.3f + life);
+                    pen.Color = Color.FromArgb(Alpha.Clamp(120 * (1 - life)), 255, 190, 150);
+                    g.DrawEllipse(pen, q.X - s, q.Y - s * 0.22f, s * 2, s * 0.44f);
+                }
+            }
+            for (int i = 0; i < fx.Length; i++)   // fireflies
+            {
+                float a = (float)Math.Max(0, Math.Sin(t / 700 + fph[i] * 3));
+                if (a < 0.05f) continue;
+                float r = 2.2f * ui;
+                GlowSprite.Draw(g, fx[i], fy[i], r * 7, 200, 255, 120, 0.4f * a);
+                GlowSprite.Draw(g, fx[i], fy[i], r * 1.6f, 240, 255, 190, a);
+            }
+            pen.Color = Color.FromArgb(255, 20, 12, 24); pen.Width = 2 * ui;
+            for (int i = 0; i < bx.Length; i++)   // birds
+            {
+                float s = 11 * ui, flap = (float)Math.Sin(t / 160 + bph[i]) * s * 0.35f;
+                g.DrawLines(pen, new PointF[] { new PointF(bx[i] - s, by[i] - flap), new PointF(bx[i] - s * 0.4f, by[i] - s * 0.05f), new PointF(bx[i], by[i] + s * 0.15f),
+                                                new PointF(bx[i] + s * 0.4f, by[i] - s * 0.05f), new PointF(bx[i] + s, by[i] - flap) });
+            }
+            foreach (float[] B in d.Bobs)   // boat light bobbing on the water
+            {
+                PointF p = M(B[0], B[1]);
+                float yb = p.Y + (float)Math.Sin(t / 900) * 1.5f * sc, r = 2.2f * ui;
+                GlowSprite.Draw(g, p.X, yb, r * 6, (int)B[2], (int)B[3], (int)B[4], 0.35f);
+                GlowSprite.Draw(g, p.X, yb, r * 1.5f, 255, 236, 200, 0.95f);
+                for (int j = 0; j < 7; j++)   // its reflection, broken up by the swell
+                {
+                    float wob = (float)Math.Sin(t / 400 + j) * 2.5f * ui;
+                    GlowSprite.Draw(g, p.X + wob, yb + (7 + j * 6) * ui, (3.2f - j * 0.25f) * ui, (int)B[2], (int)B[3], (int)B[4], (0.45f - j * 0.05f) * (0.6f + 0.4f * (float)Math.Sin(t / 300 + j)));
+                }
+            }
+            for (int ci = 0; ci < d.Curtains.Count; ci++)   // aurora curtains shimmering
+            {
+                float[] C = d.Curtains[ci]; PointF p = M(C[0], C[1]);
+                double f = 0.5 + 0.5 * Math.Sin(t / 900 + ci * 0.35) * Math.Sin(t / 2300 + ci * 0.11);
+                float hh = C[2] * sc * (0.75f + 0.35f * (float)f);
+                using (LinearGradientBrush lb = new LinearGradientBrush(new PointF(p.X, p.Y + 1), new PointF(p.X, p.Y - hh - 1), Color.FromArgb(Alpha.Clamp(150 * f), (int)C[3], (int)C[4], (int)C[5]), Color.FromArgb(0, (int)C[3], (int)C[4], (int)C[5])))
+                using (Pen cp = new Pen(lb, 5 * sc))
+                    g.DrawLine(cp, p.X, p.Y, p.X + (float)Math.Sin(t / 1700 + ci) * 6 * sc, p.Y - hh);
+            }
+            foreach (float[] Wv in d.Waves)   // waves washing up the sand: a soft sheet of water with broken foam at its edge
+            {
+                float x1 = M(Wv[0], 0).X, x2 = M(Wv[1], 0).X, y = M(0, Wv[2]).Y, amp = Wv[3] * sc;
+                int count = (int)Wv[4];
+                for (int line = 0; line < count; line++)
+                {
+                    double cyc = (t / 6200.0 + line / (double)count) % 1.0;
+                    float prog = (float)(1 - Math.Pow(1 - cyc, 2));
+                    float yy = y - line * 12 * sc - amp * 1.2f + prog * amp * 3.6f;
+                    float life = (float)Math.Sin(cyc * Math.PI) * (1 - line * 0.22f);
+                    if (life < 0.04f) continue;
+                    const int N = 48;
+                    PointF[] edge = new PointF[N];
+                    for (int i = 0; i < N; i++)
+                    {
+                        float xx = x1 + (x2 - x1) * i / (N - 1);
+                        edge[i] = new PointF(xx, yy + (float)(Math.Sin(xx / (150 * sc) + line * 1.3 + t / 3400) * 6 + Math.Sin(xx / (53 * sc) + line) * 2.5) * sc);
+                    }
+                    // the thin sheet of water behind the foam line
+                    PointF[] sheet = new PointF[N * 2];
+                    for (int i = 0; i < N; i++) { sheet[i] = edge[i]; sheet[N * 2 - 1 - i] = new PointF(edge[i].X, edge[i].Y - amp * 1.4f); }
+                    brush.Color = Color.FromArgb(Alpha.Clamp(28 * life), 200, 196, 230);
+                    g.FillPolygon(brush, sheet);
+                    // foam: broken into pieces of different brightness, never one hard line
+                    for (int i = 0; i < N - 1; i++)
+                    {
+                        double n = 0.5 + 0.5 * Math.Sin(i * 1.7 + line * 4.1 + Math.Floor(cyc * 3) * 2.3);
+                        float a = (float)(life * n);
+                        if (a < 0.12f) continue;
+                        pen.Color = Color.FromArgb(Alpha.Clamp(170 * a), 240, 236, 252); pen.Width = Math.Max(1f, (2.2f - line * 0.4f) * ui);
+                        g.DrawLine(pen, edge[i], edge[i + 1]);
+                        GlowSprite.Draw(g, (edge[i].X + edge[i + 1].X) / 2, (edge[i].Y + edge[i + 1].Y) / 2 + 2 * sc, 16 * sc, 236, 232, 250, 0.18f * a);
+                    }
+                }
+            }
+        }
+
+        void DrawInside(Graphics g, double t)
+        {
+            foreach (float[] pl in d.Pulses)   // lamp and screen glow, breathing gently
+            {
+                if (pl[5] <= 0) continue;
+                PointF p = M(pl[0], pl[1]);
+                float r = 140 * sc;
+                double f = 0.8 + 0.2 * Math.Sin(t / 1800 + pl[0]);
+                using (GraphicsPath gp = new GraphicsPath())
+                {
+                    gp.AddEllipse(p.X - r, p.Y - r, r * 2, r * 2);
+                    using (PathGradientBrush pb = new PathGradientBrush(gp))
+                    {
+                        pb.CenterColor = Color.FromArgb(Alpha.Clamp(pl[5] * f), (int)pl[2], (int)pl[3], (int)pl[4]);
+                        pb.SurroundColors = new Color[] { Color.FromArgb(0, (int)pl[2], (int)pl[3], (int)pl[4]) };
+                        g.FillPath(pb, gp);
+                    }
+                }
+            }
+            if (d.LifeUnder)
+                foreach (Part q in parts)
+                {
+                    if (q.Kind != 0) continue;
+                    float life = q.Age / q.Life, s = q.Size * (1 + q.Age * 0.55f);
+                    brush.Color = Color.FromArgb(Alpha.Clamp(55 * (1 - life) * Math.Min(1, q.Age * 2)), 214, 204, 226);
+                    g.FillEllipse(brush, q.X - s, q.Y - s * 0.8f, s * 2, s * 1.6f);
+                }
+            for (int i = 0; i < gx.Length; i++)   // raindrops on the glass
+            {
+                float r = 2.6f * ui;
+                brush.Color = Color.FromArgb(110, 224, 216, 244); g.FillEllipse(brush, gx[i] - r, gy[i] - r, r * 2, r * 2.6f);
+                if (gv[i] > 0) { pen.Color = Color.FromArgb(50, 224, 216, 244); pen.Width = 1.2f * ui; g.DrawLine(pen, gx[i], gy[i] - r, gx[i] - (float)Math.Sin(t / 300 + gph[i]) * 2, gy[i] - 26 * ui); }
+            }
+        }
+
+        void DrawDrops(Graphics g)
+        {
+            if (dropKind == 1)
+            {
+                pen.Color = Color.FromArgb(80, 205, 198, 228); pen.Width = 1;
+                for (int i = 0; i < dx.Length; i++) g.DrawLine(pen, dx[i], dy[i], dx[i] + dlen[i] * 0.12f, dy[i] - dlen[i]);
+            }
+            else if (dropKind == 2)
+            {
+                brush.Color = Color.FromArgb(210, 242, 238, 250);
+                for (int i = 0; i < dx.Length; i++) g.FillEllipse(brush, dx[i] - dr[i], dy[i] - dr[i], dr[i] * 2, dr[i] * 2);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (bg != null) bg.Dispose();
+            if (front != null) front.Dispose();
+            if (train != null) train.Bmp.Dispose();
+            foreach (Bitmap b in new Bitmap[] { bgDawn, bgMix, frontDawn, frontMix }) if (b != null) b.Dispose();
+            foreach (Sway sy in sways) sy.Bmp.Dispose();
+            foreach (Drift dr in drifts) dr.Bmp.Dispose();
+            foreach (Fade fd in fades) { foreach (Bitmap b in fd.Frames) b.Dispose(); fd.Mix.Dispose(); }
+            if (skyClip != null) skyClip.Dispose();
+            if (skyRegion != null) skyRegion.Dispose();
+            if (d != null && d.Background != null) d.Background.Dispose();
+            brush.Dispose(); pen.Dispose();
         }
     }
 
@@ -505,10 +1623,8 @@ namespace NightfallMoonClock
         double activeStart, nextConstellation;
         int lastShape = -1;
         int lastHour = -1;
-        SceneData scene;
-        float sceneScale = 1, sceneOx, sceneOy;
-        GraphicsPath skyClip;
-        float[] lightPhase;
+        SceneRenderer sceneR;
+        double lastDawnCheck = -1e9;
         int rainDiv = 9000;
         Font labelFont;
         readonly SolidBrush twinkleBrush = new SolidBrush(Color.White);
@@ -545,8 +1661,12 @@ namespace NightfallMoonClock
 
             weather = WeatherService.Kind(s);
             phase = CurrentPhase();
-            if (SkyManager.SceneKey != "sky") scene = SceneData.Load(SkyManager.SceneKey);
-            if (scene != null) BuildScene();
+            if (SkyManager.SceneKey != "sky")
+            {
+                SceneData sd = SceneData.Load(SkyManager.SceneKey, settings);
+                if (sd != null) { sceneR = new SceneRenderer(); sceneR.AllowShootingStars = settings.SkyShooting; sceneR.TrainGapSeconds = settings.TrainGap(); sceneR.Parallax = false; sceneR.ClickStars = sceneR.ClickLights = sceneR.ClickWater = false; sceneR.Build(sd, Width, Height, scale); weather = "clear";  sceneR.SetDawn(SunClock.DawnAmount(settings, DateTime.Now), true);}
+            }
+            if (sceneR != null) { background = new Bitmap(1, 1); }
             else
             {
                 BuildBackground();
@@ -628,7 +1748,7 @@ namespace NightfallMoonClock
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 int count = (int)(w * h / 5200f);
-                using (SolidBrush star = new SolidBrush(Color.FromArgb((int)(190 * pal.Stars), 236, 228, 244)))
+                using (SolidBrush star = new SolidBrush(Color.FromArgb(Alpha.Clamp(190 * pal.Stars), 236, 228, 244)))
                 {
                     for (int i = 0; i < count; i++)
                     {
@@ -682,113 +1802,6 @@ namespace NightfallMoonClock
             int x = -(int)offset;
             g.DrawImageUnscaled(layer, x, y);
             if (x + layer.Width < g.VisibleClipBounds.Right + 1) g.DrawImageUnscaled(layer, x + layer.Width, y);
-        }
-
-        PointF Map(float x, float y) { return new PointF(sceneOx + x * sceneScale, sceneOy + y * sceneScale); }
-
-        // an illustrated scene: a still painting with stars, lights, water and rain animated on top
-        void BuildScene()
-        {
-            int w = Width, h = Height;
-            sceneScale = Math.Max(w / (float)scene.Background.Width, h / (float)scene.Background.Height);   // fill the screen
-            sceneOx = (w - scene.Background.Width * sceneScale) / 2;
-            sceneOy = (h - scene.Background.Height * sceneScale) / 2;
-            background = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
-            using (Graphics g = Graphics.FromImage(background))
-            {
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.DrawImage(scene.Background, sceneOx, sceneOy, scene.Background.Width * sceneScale, scene.Background.Height * sceneScale);
-            }
-            Random r = new Random(5);
-            twinklers.Clear();
-            foreach (float[] st in scene.Stars)
-            {
-                PointF p = Map(st[0], st[1]);
-                Star t = new Star();
-                t.x = p.X; t.y = p.Y; t.r = st[2] * scale;
-                t.phase = (float)(r.NextDouble() * Math.PI * 2);
-                t.speed = 0.6f + (float)r.NextDouble() * 1.2f;
-                twinklers.Add(t);
-            }
-            lightPhase = new float[scene.Lights.Count + scene.Shimmers.Count + scene.Ripples.Count + 1];
-            for (int i = 0; i < lightPhase.Length; i++) lightPhase[i] = (float)(r.NextDouble() * Math.PI * 2);
-
-            // shooting stars and meteors are clipped to the sky, so they never cross the mountains
-            skyClip = new GraphicsPath();
-            List<PointF> pts = new List<PointF>();
-            pts.Add(new PointF(0, 0));
-            foreach (PointF sp in scene.Skyline) pts.Add(Map(sp.X, sp.Y));
-            pts.Add(new PointF(w, pts[pts.Count - 1].Y));
-            pts.Add(new PointF(w, 0));
-            skyClip.AddPolygon(pts.ToArray());
-
-            weather = scene.Rain == "none" ? "clear" : "rain";
-            rainDiv = scene.Rain == "heavy" ? 6000 : 12000;
-            dimAlpha = 0;   // the constructor builds the rain once, right after this
-        }
-
-        void DrawSceneLife(Graphics g, double t)
-        {
-            int k = 0;
-            // city lights that gently flicker and glimmer
-            using (SolidBrush b = new SolidBrush(Color.White))
-            {
-                foreach (float[] L in scene.Lights)
-                {
-                    float ph = lightPhase[k++];
-                    double f = 0.5 + 0.5 * Math.Sin(t / (700 + (ph * 90)) + ph);
-                    PointF p = Map(L[0], L[1]);
-                    float rr = Math.Max(1f, L[2] * sceneScale) * (1.2f + (float)f);
-                    b.Color = Color.FromArgb((int)(40 * f), (int)L[3], (int)L[4], (int)L[5]);
-                    g.FillEllipse(b, p.X - rr * 3, p.Y - rr * 3, rr * 6, rr * 6);
-                    b.Color = Color.FromArgb((int)(120 + 135 * f), (int)L[3], (int)L[4], (int)L[5]);
-                    g.FillEllipse(b, p.X - rr * 0.6f, p.Y - rr * 0.6f, rr * 1.2f, rr * 1.2f);
-                }
-            }
-            // moonlight glinting on the river
-            using (Pen pen = new Pen(Color.White, Math.Max(1f, sceneScale)))
-            {
-                foreach (float[] S in scene.Shimmers)
-                {
-                    float ph = lightPhase[k++];
-                    double f = Math.Pow(Math.Max(0, Math.Sin(t / 650 + ph)), 3);
-                    if (f < 0.03) continue;
-                    PointF a = Map(S[0], S[2]), c = Map(S[1], S[2]);
-                    float drift = (float)Math.Sin(t / 1300 + ph) * 6 * sceneScale;
-                    pen.Color = Color.FromArgb((int)(110 * f), 232, 222, 245);
-                    g.DrawLine(pen, a.X + drift, a.Y, c.X + drift, c.Y);
-                }
-                // city reflections rippling on the water
-                foreach (float[] R in scene.Ripples)
-                {
-                    float ph = lightPhase[k++];
-                    double f = 0.5 + 0.5 * Math.Sin(t / 520 + ph);
-                    PointF a = Map(R[0], R[1]);
-                    float wob = (float)Math.Sin(t / 380 + ph * 2) * 2.5f * sceneScale;
-                    pen.Color = Color.FromArgb((int)(25 + 60 * f), (int)R[3], (int)R[4], (int)R[5]);
-                    g.DrawLine(pen, a.X + wob, a.Y, a.X - wob, a.Y + R[2] * sceneScale);
-                }
-            }
-            // the cabin window, flickering like firelight
-            if (!scene.Window.IsEmpty)
-            {
-                float ph = lightPhase[k];
-                double f = 0.6 + 0.25 * Math.Sin(t / 230 + ph) + 0.15 * Math.Sin(t / 97 + ph * 3);
-                PointF p = Map(scene.Window.X, scene.Window.Y);
-                float ww = scene.Window.Width * sceneScale, hh = scene.Window.Height * sceneScale;
-                using (GraphicsPath gp = new GraphicsPath())
-                {
-                    gp.AddEllipse(p.X - ww * 2.5f, p.Y - hh * 2.5f, ww * 6, hh * 6);
-                    using (PathGradientBrush pb = new PathGradientBrush(gp))
-                    {
-                        pb.CenterColor = Color.FromArgb((int)(70 * f), 255, 170, 90);
-                        pb.SurroundColors = new Color[] { Color.FromArgb(0, 255, 170, 90) };
-                        g.FillPath(pb, gp);
-                    }
-                }
-                using (SolidBrush wb = new SolidBrush(Color.FromArgb((int)(150 + 105 * Math.Min(1, f)), 255, 196, 115)))
-                    g.FillRectangle(wb, p.X, p.Y, ww, hh);
-            }
         }
 
         void BuildExtras()
@@ -967,7 +1980,7 @@ namespace NightfallMoonClock
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 RectangleF tb = time.GetBounds();
-                using (Matrix m = new Matrix()) { m.Translate(Width / 2f, Height * 0.24f - tb.Y); time.Transform(m); }
+                using (Matrix m = new Matrix()) { m.Translate(Width / 2f, Height * (sceneR != null && sceneR.ClockTop > 0 ? sceneR.ClockTop : 0.24f) - tb.Y); time.Transform(m); }
                 RectangleF tb2 = time.GetBounds();
                 RectangleF db = date.GetBounds();
                 using (Matrix m = new Matrix()) { m.Translate(Width / 2f, tb2.Bottom + 30 * scale - db.Y); date.Transform(m); }
@@ -1030,14 +2043,14 @@ namespace NightfallMoonClock
                 currentMinute = minute;
                 if (IsPrimary) BuildTextLayer();
                 string p = CurrentPhase();
-                if (p != phase && scene == null) { phase = p; BuildBackground(); BuildExtras(); }
+                if (p != phase && sceneR == null) { phase = p; BuildBackground(); BuildExtras(); }
             }
-            if (IsPrimary && !lockedPc && settings.LockAfter > 0 && t > settings.LockAfter * 60000.0 && NowPlaying.Last == null)
+            if (IsPrimary && !lockedPc && settings.LockEnabled && settings.LockAfter > 0 && t > settings.LockAfter * 60000.0 && NowPlaying.Last == null)
             {
                 lockedPc = true;
                 NativeSky.LockWorkStation();
             }
-            if (settings.SkyParallax && scene == null)
+            if (settings.SkyParallax && sceneR == null)
             {
                 starOffset = (starOffset + (float)dt * 2.2f * scale) % Width;
                 float[] speeds = { 4f, 7f, 11f };
@@ -1050,17 +2063,22 @@ namespace NightfallMoonClock
             {
                 string song = settings.SkyPlaying ? NowPlaying.Last : null;
                 if (song != shownSong) { shownSong = song; BuildTextLayer(); }
-                if (settings.SkyConstellations && scene == null) UpdateConstellation(t);
+                if (settings.SkyConstellations && sceneR == null) UpdateConstellation(t);
             }
             if (clouds != null) cloudOffset = (cloudOffset + (float)dt * 9 * scale) % clouds.Width;
             if (aurora != null) auroraOffset = (auroraOffset + (float)dt * 6 * scale) % aurora.Width;
             if (IsPrimary && settings.SkyThoughts && t - thoughtChangedAt > 60000) { thought = Thoughts.Next(); thoughtChangedAt = t; BuildThoughtLayer(); }
             if (IsPrimary && thoughtLayer == null && !string.IsNullOrEmpty(thought)) BuildThoughtLayer();
 
-            if (settings.SkyShooting && t > nextShot)
+            if (sceneR != null)
+            {
+                if (t - lastDawnCheck > 1000) { lastDawnCheck = t; sceneR.SetDawn(SunClock.DawnAmount(settings, DateTime.Now)); }
+                sceneR.Step(t, dt);
+            }
+            if (sceneR == null && settings.SkyShooting && t > nextShot)
             {
                 Streak s = new Streak();
-                s.x = Width * (0.35f + (float)rng.NextDouble() * 0.6f); s.y = Height * (0.05f + (float)rng.NextDouble() * (scene != null ? 0.12f : 0.25f));
+                s.x = Width * (0.35f + (float)rng.NextDouble() * 0.6f); s.y = Height * (0.05f + (float)rng.NextDouble() * (sceneR != null ? 0.12f : 0.25f));
                 s.vx = -(260 + (float)rng.NextDouble() * 160) * scale; s.vy = (110 + (float)rng.NextDouble() * 60) * scale;
                 s.tail = 0.25f; s.width = 1.6f; s.start = t; s.duration = 900;
                 streaks.Add(s);
@@ -1068,7 +2086,7 @@ namespace NightfallMoonClock
             }
             if (settings.SkyShowers && t > nextShower)
             {
-                StartShower(t);
+                if (sceneR != null) sceneR.StartShower(t); else StartShower(t);
                 nextShower = t + 180000 + rng.Next(180000);
             }
 
@@ -1128,7 +2146,7 @@ namespace NightfallMoonClock
             float shift = -starOffset;
             int lineCount = activeShape.Lines.Length / 2;
             double drawn = Math.Max(0, Math.Min(lineCount, (age - 1500) / 4000.0 * lineCount));
-            using (Pen p = new Pen(Color.FromArgb((int)(120 * a), 214, 200, 238), 1.1f * scale))
+            using (Pen p = new Pen(Color.FromArgb(Alpha.Clamp(120 * a), 214, 200, 238), 1.1f * scale))
             {
                 for (int i = 0; i < lineCount; i++)
                 {
@@ -1139,8 +2157,8 @@ namespace NightfallMoonClock
                     g.DrawLine(p, Wrap(s1.X + shift), s1.Y, Wrap(s1.X + shift) + (s2.X - s1.X) * f, s1.Y + (s2.Y - s1.Y) * f);
                 }
             }
-            using (SolidBrush glow = new SolidBrush(Color.FromArgb((int)(45 * a), 236, 228, 244)))
-            using (SolidBrush star = new SolidBrush(Color.FromArgb((int)(255 * a), 248, 244, 255)))
+            using (SolidBrush glow = new SolidBrush(Color.FromArgb(Alpha.Clamp(45 * a), 236, 228, 244)))
+            using (SolidBrush star = new SolidBrush(Color.FromArgb(Alpha.Clamp(255 * a), 248, 244, 255)))
             {
                 foreach (PointF pt in activePts)
                 {
@@ -1150,7 +2168,7 @@ namespace NightfallMoonClock
                 }
             }
             if (labelFont == null) labelFont = new Font("Segoe UI Semilight", 11f);
-            using (SolidBrush b = new SolidBrush(Color.FromArgb((int)(170 * a), 203, 191, 214)))
+            using (SolidBrush b = new SolidBrush(Color.FromArgb(Alpha.Clamp(170 * a), 203, 191, 214)))
             using (StringFormat fmt = new StringFormat())
             {
                 fmt.Alignment = StringAlignment.Center;
@@ -1170,6 +2188,7 @@ namespace NightfallMoonClock
         // a quiet marker of the hour: the stars shimmer, a few shooting stars, and a constellation appears
         void HourShimmer(double t)
         {
+            if (sceneR != null) { sceneR.Shimmer(t); return; }
             shimmerStart = t;
             for (int i = 0; i < 4; i++)
             {
@@ -1232,12 +2251,18 @@ namespace NightfallMoonClock
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            try { PaintFrame(e); }
+            catch (Exception) { }   // a single frame that can't be drawn is skipped; the next one carries on
+        }
+
+        void PaintFrame(PaintEventArgs e)
+        {
             Graphics g = e.Graphics;
             double t = clock.Elapsed.TotalMilliseconds;
             g.CompositingQuality = CompositingQuality.HighSpeed;
             g.InterpolationMode = InterpolationMode.NearestNeighbor;
             g.DrawImageUnscaled(background, 0, 0);
-            if (scene != null) { PaintScene(g, t); return; }
+            if (sceneR != null) { sceneR.Paint(g, t); DrawTextLayers(g, t); return; }
             float starDim = (weather == "rain" || weather == "storm" ? 0.35f : weather == "fog" ? 0.55f : weather == "snow" ? 0.65f : 1f) * Palettes[phase].Stars;
             if (starLayer != null) DrawTiled(g, starLayer, starOffset, 0);
             g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -1298,7 +2323,7 @@ namespace NightfallMoonClock
                 using (Pen p = new Pen(Color.FromArgb(80, 205, 198, 228), 1))
                     foreach (Drop d in drops) g.DrawLine(p, d.x, d.y, d.x + d.len * 0.12f, d.y - d.len);
                 if (flash > 0.01)
-                    using (SolidBrush b = new SolidBrush(Color.FromArgb((int)(36 * flash), 230, 225, 255)))
+                    using (SolidBrush b = new SolidBrush(Color.FromArgb(Alpha.Clamp(36 * flash), 230, 225, 255)))
                         g.FillRectangle(b, 0, 0, Width, Height);
             }
             else if (weather == "snow")
@@ -1334,26 +2359,6 @@ namespace NightfallMoonClock
             }
         }
 
-        void PaintScene(Graphics g, double t)
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            Region old = g.Clip;
-            g.SetClip(skyClip, CombineMode.Intersect);
-            double since = t - shimmerStart;
-            foreach (Star s in twinklers)
-            {
-                double boost = since >= 0 && since < 7000 ? Math.Sin(Math.PI * since / 7000) * (0.5 + 0.5 * Math.Sin(t / 160 + s.phase * 3)) : 0;
-                int a = (int)(255 * Math.Min(1, 0.55 + 0.45 * Math.Sin(t / 1000 * s.speed + s.phase) + boost * 0.6));
-                twinkleBrush.Color = Color.FromArgb(Math.Max(0, Math.Min(255, a)), 236, 228, 244);
-                g.FillEllipse(twinkleBrush, s.x - s.r, s.y - s.r, s.r * 2, s.r * 2);
-            }
-            DrawStreaks(g, t);
-            g.Clip = old;
-            DrawSceneLife(g, t);
-            DrawWeatherLayer(g);
-            DrawTextLayers(g, t);
-        }
-
         protected override void OnPaintBackground(PaintEventArgs e) { }
 
         public void BeginFadeOut() { fadingOut = true; }
@@ -1373,8 +2378,7 @@ namespace NightfallMoonClock
             if (clouds != null) clouds.Dispose();
             if (aurora != null) aurora.Dispose();
             if (labelFont != null) labelFont.Dispose();
-            if (skyClip != null) skyClip.Dispose();
-            if (scene != null && scene.Background != null) scene.Background.Dispose();
+            if (sceneR != null) sceneR.Dispose();
             twinkleBrush.Dispose();
             base.OnFormClosed(e);
             SkyManager.Closed(this);
@@ -1382,14 +2386,89 @@ namespace NightfallMoonClock
     }
 
     // ---------------------------------------------------------------- settings window
+
+    // A grid of scene previews to choose from.
+    class ScenePickerForm : Form
+    {
+        public string Chosen;
+        public static Image Thumb(string key)
+        {
+            try
+            {
+                string f = Path.Combine(SceneData.Folder, "thumbs", key + ".jpg");
+                if (File.Exists(f)) using (Image im = Image.FromFile(f)) return new Bitmap(im);
+            }
+            catch { }
+            return null;
+        }
+        public static string NameOf(string key)
+        {
+            if (key == "sky") return "Nightfall sky (classic)";
+            if (key == "rotate") return "A different scene each time";
+            int i = Array.IndexOf(SceneData.Keys, key);
+            return i >= 0 ? SceneData.Names[i] : key;
+        }
+
+        public ScenePickerForm(string current, bool includeExtras, Color bg, Color fg)
+        {
+            Text = "Choose a scene";
+            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
+            StartPosition = FormStartPosition.CenterParent;
+            BackColor = bg; ForeColor = fg; Font = new Font("Segoe UI", 9.5f);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            KeyPreview = true;
+            KeyDown += delegate(object o, KeyEventArgs e) { if (e.KeyCode == Keys.Escape) Close(); };
+            FlowLayoutPanel grid = new FlowLayoutPanel();
+            grid.Dock = DockStyle.Fill; grid.AutoScroll = true; grid.Padding = new Padding(12);
+            List<string> keys = new List<string>();
+            if (includeExtras) keys.Add("sky");
+            keys.AddRange(SceneData.Keys);
+            if (includeExtras) keys.Add("rotate");
+            Button focus = null;
+            foreach (string k in keys)
+            {
+                string key = k;
+                Button b = new Button();
+                b.Size = new Size(176, 124);
+                b.Margin = new Padding(6);
+                b.FlatStyle = FlatStyle.Flat;
+                b.FlatAppearance.BorderSize = key == current ? 2 : 1;
+                b.FlatAppearance.BorderColor = key == current ? Color.FromArgb(200, 170, 230) : Color.FromArgb(60, 44, 70);
+                b.FlatAppearance.MouseOverBackColor = Color.FromArgb(48, 32, 56);
+                Image t = Thumb(key);
+                if (t != null) { b.Image = new Bitmap(t, new Size(160, 90)); t.Dispose(); }
+                b.Text = NameOf(key);
+                b.TextImageRelation = TextImageRelation.ImageAboveText;
+                b.ForeColor = fg;
+                b.Click += delegate { Chosen = key; DialogResult = DialogResult.OK; Close(); };
+                grid.Controls.Add(b);
+                if (key == current) focus = b;
+            }
+            Controls.Add(grid);
+            ClientSize = new Size(4 * 188 + 24 + SystemInformation.VerticalScrollBarWidth, Math.Min(4 * 136 + 24, Screen.PrimaryScreen.WorkingArea.Height - 120));
+            if (focus != null) Shown += delegate { focus.Focus(); grid.ScrollControlIntoView(focus); };
+        }
+    }
+
     class AwaySettingsForm : Form
     {
         readonly Settings settings;
         readonly Action onChange;
         NumericUpDown iconsMin, skyMin;
         CheckBox shooting, showers, moon, clockBox, thoughts, pauseMedia, playingBox, parallaxBox, constBox, hourlyBox;
-        ComboBox weatherBox, colorsBox, extrasBox, moonBox, sceneBox;
+        ComboBox weatherBox, colorsBox, extrasBox, moonBox, wallModeBox;
+        CheckBox wallOn, wallBattery, wallSaver, wallStars, wallLights, wallWater, wallParallax;
+        ComboBox trainBox, roomBox, timeBox;
+        NumericUpDown wallBelow;
+        CheckBox h24Box, playingLineBox, bigMoonBox, tonightBox, alignBox, startupBox, centerBox;
+        ComboBox lookBox, lookMaxBox;
+        readonly List<FlowLayoutPanel> pages = new List<FlowLayoutPanel>();
+        string sceneValue, wallSceneValue;
+        readonly List<Button> tabButtons = new List<Button>();
+        FlowLayoutPanel tabBar;
+        Panel scroller;
         NumericUpDown lockMin;
+        CheckBox lockBox;
         TextBox cityBox;
         Label status;
 
@@ -1401,7 +2480,7 @@ namespace NightfallMoonClock
         {
             settings = s;
             onChange = changed;
-            Text = "Moon Clock: away mode";
+            Text = "Moon Clock settings";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
@@ -1411,17 +2490,39 @@ namespace NightfallMoonClock
             AutoSize = false;
             Padding = new Padding(0);
 
-            FlowLayoutPanel col = new FlowLayoutPanel();
-            col.FlowDirection = FlowDirection.TopDown;
-            col.WrapContents = false;
-            col.AutoSize = true;
+            tabBar = new FlowLayoutPanel();
+            tabBar.Dock = DockStyle.Top;
+            tabBar.AutoSize = true;
+            tabBar.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            tabBar.Padding = new Padding(14, 10, 14, 0);
+            tabBar.BackColor = Color.FromArgb(34, 21, 40);
             // settings scroll inside this panel, so the window always fits on screen
-            Panel scroller = new Panel();
+            scroller = new Panel();
             scroller.Dock = DockStyle.Fill;
             scroller.AutoScroll = true;
             scroller.Padding = new Padding(18, 14, 18, 6);
-            scroller.Controls.Add(col);
 
+            // ---------------- Clock tab
+            FlowLayoutPanel col = NewPage("Clock");
+            col.Controls.Add(Heading("On the desktop"));
+            h24Box = Check("Use 24-hour time", s.Use24h); col.Controls.Add(h24Box);
+            playingLineBox = Check("Show what's playing", s.ShowPlaying); col.Controls.Add(playingLineBox);
+            bigMoonBox = Check("Large moon beside the time", s.BigMoon); col.Controls.Add(bigMoonBox);
+            tonightBox = Check("Show tonight's constellation", s.ShowTonight); col.Controls.Add(tonightBox);
+            alignBox = Check("Align to the right", s.AlignRight); col.Controls.Add(alignBox);
+            startupBox = Check("Start with Windows", ClockWindow.IsStartup()); col.Controls.Add(startupBox);
+            col.Controls.Add(Heading("Taskbar"));
+            centerBox = Check(TaskbarSupport.Supported ? "Center taskbar icons" : "Center taskbar icons (Windows 10 only)", s.CenterTaskbar && TaskbarSupport.Supported);
+            centerBox.Enabled = TaskbarSupport.Supported; col.Controls.Add(centerBox);
+            lookBox = Combo(new string[] { "Clear", "Blur", "Acrylic (night tint)", "Windows default" }, new string[] { "clear", "blur", "acrylic", "off" }, s.TaskbarStyle);
+            col.Controls.Add(Row("Taskbar look", lookBox, ""));
+            lookMaxBox = Combo(new string[] { "Keep the same look", "Clear", "Blur", "Acrylic (night tint)", "Windows default" }, new string[] { "same", "clear", "blur", "acrylic", "normal" }, s.TaskbarMaximized);
+            col.Controls.Add(Row("When a window is maximized", lookMaxBox, ""));
+            lookBox.Enabled = lookMaxBox.Enabled = TaskbarSupport.Supported;
+            col.Controls.Add(Hint("Tip: double-click the moon in the tray to open these settings."));
+
+            // ---------------- Away mode tab
+            col = NewPage("Away mode");
             col.Controls.Add(Heading("When you're away"));
             iconsMin = Number(s.IconsAfter);
             col.Controls.Add(Row("Hide desktop icons after", iconsMin, "minutes"));
@@ -1430,13 +2531,25 @@ namespace NightfallMoonClock
             col.Controls.Add(Hint("Set either one to 0 to turn it off. Moving the mouse or pressing a key brings everything back."));
             pauseMedia = Check("Don't show the sky while music or video is playing", s.PauseForMedia);
             col.Controls.Add(pauseMedia);
-            lockMin = Number(s.LockAfter);
-            col.Controls.Add(Row("Lock my PC after the sky has shown for", lockMin, "minutes"));
+            lockBox = Check("Lock my PC while I'm away", s.LockEnabled && s.LockAfter > 0);
+            col.Controls.Add(lockBox);
+            lockMin = Number(s.LockAfter > 0 ? s.LockAfter : 20);
+            lockMin.Minimum = 1;
+            Control lockRow = Row("      after the sky has shown for", lockMin, "minutes");
+            col.Controls.Add(lockRow);
+            col.Controls.Add(Hint("It never locks while music or video is playing."));
+            lockMin.Enabled = lockBox.Checked;
+            lockBox.CheckedChanged += delegate { lockMin.Enabled = lockBox.Checked; };
 
+            // ---------------- Scenes tab
+            col = NewPage("Scenes");
             col.Controls.Add(Heading("Look"));
-            sceneBox = Combo(new string[] { "Nightfall sky (classic)", "River Night", "Galaxy Peaks", "City Below", "Rain over the City", "A different scene each time" },
-                             new string[] { "sky", "river", "galaxy", "city", "raincity", "rotate" }, s.Scene);
-            col.Controls.Add(Row("Scene", sceneBox, ""));
+            List<string> sl = new List<string>(), sv = new List<string>();
+            sl.Add("Nightfall sky (classic)"); sv.Add("sky");
+            for (int i = 0; i < SceneData.Keys.Length; i++) { sl.Add(SceneData.Names[i]); sv.Add(SceneData.Keys[i]); }
+            sl.Add("A different scene each time"); sv.Add("rotate");
+            sceneValue = s.Scene;
+            col.Controls.Add(PickerRow("Scene", sceneValue, true, delegate(string k) { sceneValue = k; }));
             col.Controls.Add(Hint("Illustrated scenes have their own moon and weather, so the options below apply to the classic sky."));
             colorsBox = Combo(new string[] { "Always night (classic)", "Follow the time of day" }, new string[] { "night", "auto" }, s.SkyColors);
             col.Controls.Add(Row("Sky colors", colorsBox, ""));
@@ -1446,6 +2559,7 @@ namespace NightfallMoonClock
             col.Controls.Add(Row("Moon", moonBox, ""));
             parallaxBox = Check("Gentle parallax (stars, clouds and mountains drift)", s.SkyParallax); col.Controls.Add(parallaxBox);
 
+            col = pages[1];   // these belong with away mode
             col.Controls.Add(Heading("In the sky"));
             shooting = Check("Shooting stars", s.SkyShooting); col.Controls.Add(shooting);
             showers = Check("Meteor showers now and then", s.SkyShowers); col.Controls.Add(showers);
@@ -1456,6 +2570,42 @@ namespace NightfallMoonClock
             constBox = Check("Real constellations now and then", s.SkyConstellations); col.Controls.Add(constBox);
             hourlyBox = Check("A gentle shimmer at the top of each hour", s.SkyHourly); col.Controls.Add(hourlyBox);
 
+            col = pages[2];
+            col.Controls.Add(Heading("Scene options"));
+            timeBox = Combo(new string[] { "Follow the real sunrise", "Follow the real sunrise and sunset", "Always night", "Always dawn" },
+                            new string[] { "sunrise", "both", "night", "dawn" }, s.TimeOfDay);
+            col.Controls.Add(Row("Time of day", timeBox, ""));
+            col.Controls.Add(Hint("Scenes turn to dawn colours around sunrise where you are (set your city in the Weather tab)."));
+            trainBox = Combo(new string[] { "Every few minutes", "Every 10 minutes", "Always, one after another" }, new string[] { "few", "ten", "loop" }, s.TrainEvery);
+            col.Controls.Add(Row("Steam Train passes", trainBox, ""));
+            roomBox = Combo(new string[] { "Rainy City", "Mountain Lake", "Snowy Forest", "Beach and Sea", "A different view each time", "Match the weather outside" },
+                            new string[] { "city", "lake", "snow", "sea", "random", "weather" }, s.RoomView);
+            col.Controls.Add(Row("Cozy Room window", roomBox, ""));
+
+            // ---------------- Wallpaper tab
+            col = NewPage("Wallpaper");
+            col.Controls.Add(Heading("Live wallpaper"));
+            wallOn = Check("Play a live scene behind my desktop icons", s.WallpaperOn); col.Controls.Add(wallOn);
+            col.Controls.Add(Hint("It only moves while your desktop is showing. When any window is open, it freezes and uses no power."));
+            wallModeBox = Combo(new string[] { "One scene I choose", "A different scene each day", "A different scene each time I unlock" }, new string[] { "fixed", "daily", "unlock" }, s.WallMode);
+            col.Controls.Add(Row("Which scene", wallModeBox, ""));
+            wallSceneValue = Array.IndexOf(SceneData.Keys, s.WallScene) >= 0 ? s.WallScene : "aurora";
+            Control wallPick = PickerRow("Scene", wallSceneValue, false, delegate(string k) { wallSceneValue = k; });
+            col.Controls.Add(wallPick);
+            wallBattery = Check("Pause when running on battery", s.WallPauseOnBattery); col.Controls.Add(wallBattery);
+            wallSaver = Check("Pause when battery saver is on", s.WallPauseSaver); col.Controls.Add(wallSaver);
+            wallBelow = Number(s.WallPauseBelow); wallBelow.Maximum = 100;
+            col.Controls.Add(Row("Pause when battery is below", wallBelow, "% (0 = never)"));
+            col.Controls.Add(Hint("On empty desktop space:"));
+            wallStars = Check("Click the sky for a shooting star", s.WallClickStars); col.Controls.Add(wallStars);
+            wallLights = Check("Click windows and lamps to switch them on or off", s.WallClickLights); col.Controls.Add(wallLights);
+            wallWater = Check("Click water for ripples", s.WallClickWater); col.Controls.Add(wallWater);
+            wallParallax = Check("Move the mouse to gently shift the view", s.WallParallax); col.Controls.Add(wallParallax);
+            EventHandler wallSync = delegate { wallPick.Enabled = wallModeBox.SelectedIndex == 0; };
+            wallModeBox.SelectedIndexChanged += wallSync; wallSync(null, null);
+
+            // ---------------- Weather tab
+            col = NewPage("Weather");
             col.Controls.Add(Heading("Weather"));
             weatherBox = new ComboBox();
             weatherBox.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -1499,18 +2649,114 @@ namespace NightfallMoonClock
 
             Controls.Add(scroller);
             Controls.Add(buttons);
-            scroller.BringToFront();   // fill the space above the button bar
+            Controls.Add(tabBar);
+            scroller.BringToFront();   // fill the space between the tabs and the button bar
+            ShowPage(0);
 
-            // size: as tall as the settings need, but never taller than the screen
-            Size content = col.GetPreferredSize(Size.Empty);
+            // size: fits the tallest tab, but never taller than the screen
+            int barH = 0;
+            Size content = Size.Empty;
+            for (int i = 0; i < pages.Count; i++)   // lay out each tab for real, then measure it
+            {
+                ShowPage(i);
+                pages[i].PerformLayout();
+                Size ps = pages[i].GetPreferredSize(Size.Empty);
+                content = new Size(Math.Max(content.Width, ps.Width), Math.Max(content.Height, ps.Height + pages[i].Margin.Vertical + 8));
+            }
+            ShowPage(0);
+            content.Width = Math.Max(content.Width, tabBar.GetPreferredSize(Size.Empty).Width - 18);
+            barH += tabBar.GetPreferredSize(Size.Empty).Height;
             Rectangle work = Screen.FromPoint(Cursor.Position).WorkingArea;
-            int barH = buttons.GetPreferredSize(Size.Empty).Height;
+            barH += buttons.GetPreferredSize(Size.Empty).Height;
             int wantW = content.Width + scroller.Padding.Horizontal + SystemInformation.VerticalScrollBarWidth + 4;
             int wantH = content.Height + scroller.Padding.Vertical + barH;
             ClientSize = new Size(Math.Min(wantW, work.Width - 40), Math.Min(wantH, (int)(work.Height * 0.9)));
             MinimumSize = new Size(Math.Min(Width, 360), Math.Min(Height, 300));
             FormBorderStyle = FormBorderStyle.Sizable;   // can be resized if you like
             MaximizeBox = false;
+        }
+
+        // a small preview of the chosen scene, its name, and a button that opens the picker
+        Control PickerRow(string label, string current, bool extras, Action<string> chosen)
+        {
+            FlowLayoutPanel row = new FlowLayoutPanel();
+            row.AutoSize = true; row.WrapContents = false; row.Margin = new Padding(0, 4, 0, 6);
+            Label l = new Label(); l.Text = label; l.AutoSize = true; l.Margin = new Padding(3, 30, 8, 0); l.ForeColor = Fg;
+            PictureBox pb = new PictureBox(); pb.Size = new Size(128, 72); pb.SizeMode = PictureBoxSizeMode.Zoom; pb.Margin = new Padding(0, 0, 10, 0);
+            pb.Cursor = Cursors.Hand;
+            Label name = new Label(); name.AutoSize = true; name.ForeColor = Fg; name.Margin = new Padding(0, 14, 0, 0);
+            Button choose = Btn("Choose...");
+            FlowLayoutPanel right = new FlowLayoutPanel(); right.FlowDirection = FlowDirection.TopDown; right.AutoSize = true; right.WrapContents = false;
+            right.Controls.Add(name); right.Controls.Add(choose);
+            Action<string> show = delegate(string k)
+            {
+                Image old = pb.Image; pb.Image = ScenePickerForm.Thumb(k); if (old != null) old.Dispose();
+                name.Text = ScenePickerForm.NameOf(k);
+            };
+            show(current);
+            EventHandler open = delegate
+            {
+                using (ScenePickerForm f = new ScenePickerForm(current, extras, Bg, Fg))
+                    if (f.ShowDialog(this) == DialogResult.OK && f.Chosen != null) { current = f.Chosen; show(current); chosen(current); }
+            };
+            choose.Click += open; pb.Click += open;
+            row.Controls.Add(l); row.Controls.Add(pb); row.Controls.Add(right);
+            return row;
+        }
+
+        FlowLayoutPanel NewPage(string title)
+        {
+            FlowLayoutPanel p = new FlowLayoutPanel();
+            p.FlowDirection = FlowDirection.TopDown;
+            p.WrapContents = false;
+            p.AutoSize = true;
+            pages.Add(p);
+            int index = pages.Count - 1;
+            Button b = new Button();
+            b.Text = title;
+            b.FlatStyle = FlatStyle.Flat;
+            b.FlatAppearance.BorderSize = 0;
+            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(48, 32, 56);
+            b.AutoSize = true;
+            b.Padding = new Padding(8, 4, 8, 6);
+            b.Margin = new Padding(0, 0, 4, 0);
+            b.ForeColor = Muted;
+            b.Cursor = Cursors.Hand;
+            b.TabStop = true;
+            b.Click += delegate { ShowPage(index); };
+            tabButtons.Add(b);
+            tabBar.Controls.Add(b);
+            return p;
+        }
+
+        void ShowPage(int index)
+        {
+            scroller.SuspendLayout();
+            scroller.Controls.Clear();
+            scroller.Controls.Add(pages[index]);
+            scroller.AutoScrollPosition = Point.Empty;
+            scroller.ResumeLayout();
+            for (int i = 0; i < tabButtons.Count; i++)
+            {
+                bool on = i == index;
+                tabButtons[i].BackColor = on ? Bg : Color.FromArgb(34, 21, 40);
+                tabButtons[i].ForeColor = on ? Fg : Muted;
+                tabButtons[i].Font = new Font(Font, on ? FontStyle.Bold : FontStyle.Regular);
+            }
+        }
+
+        // Ctrl+Tab / Ctrl+Shift+Tab move between tabs, like other Windows settings windows
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if ((keyData & Keys.Control) != 0 && (keyData & Keys.KeyCode) == Keys.Tab)
+            {
+                int cur = 0;
+                for (int i = 0; i < pages.Count; i++) if (scroller.Controls.Contains(pages[i])) cur = i;
+                int next = (keyData & Keys.Shift) != 0 ? (cur + pages.Count - 1) % pages.Count : (cur + 1) % pages.Count;
+                ShowPage(next);
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         void FindCity()
@@ -1549,14 +2795,36 @@ namespace NightfallMoonClock
             settings.SkyColors = (string)((object[])colorsBox.Tag)[colorsBox.SelectedIndex];
             settings.SkyExtras = (string)((object[])extrasBox.Tag)[extrasBox.SelectedIndex];
             settings.MoonStyle = (string)((object[])moonBox.Tag)[moonBox.SelectedIndex];
-            settings.Scene = (string)((object[])sceneBox.Tag)[sceneBox.SelectedIndex];
+            settings.Scene = sceneValue;
             settings.LockAfter = (int)lockMin.Value;
+            settings.LockEnabled = lockBox.Checked;
+            settings.Use24h = h24Box.Checked; settings.ShowPlaying = playingLineBox.Checked; settings.BigMoon = bigMoonBox.Checked;
+            settings.ShowTonight = tonightBox.Checked; settings.AlignRight = alignBox.Checked;
+            if (TaskbarSupport.Supported)
+            {
+                settings.CenterTaskbar = centerBox.Checked;
+                settings.TaskbarStyle = (string)((object[])lookBox.Tag)[lookBox.SelectedIndex];
+                settings.TaskbarMaximized = (string)((object[])lookMaxBox.Tag)[lookMaxBox.SelectedIndex];
+            }
+            if (startupBox.Checked != ClockWindow.IsStartup()) ClockWindow.SetStartup(startupBox.Checked);
+            settings.WallpaperOn = wallOn.Checked;
+            settings.WallMode = (string)((object[])wallModeBox.Tag)[wallModeBox.SelectedIndex];
+            settings.WallScene = wallSceneValue;
+            settings.WallPauseOnBattery = wallBattery.Checked;
+            settings.WallPauseSaver = wallSaver.Checked;
+            settings.WallPauseBelow = (int)wallBelow.Value;
+            settings.TrainEvery = (string)((object[])trainBox.Tag)[trainBox.SelectedIndex];
+            settings.RoomView = (string)((object[])roomBox.Tag)[roomBox.SelectedIndex];
+            settings.TimeOfDay = (string)((object[])timeBox.Tag)[timeBox.SelectedIndex];
+            settings.WallClickStars = wallStars.Checked; settings.WallClickLights = wallLights.Checked;
+            settings.WallClickWater = wallWater.Checked; settings.WallParallax = wallParallax.Checked;
             settings.SkyPlaying = playingBox.Checked;
             settings.SkyParallax = parallaxBox.Checked;
             settings.SkyConstellations = constBox.Checked;
             settings.SkyHourly = hourlyBox.Checked;
             settings.Save();
             WeatherService.Refresh(settings, false);
+            LiveWallpaper.Apply(settings);
             if (onChange != null) onChange();
         }
 

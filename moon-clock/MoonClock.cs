@@ -33,7 +33,7 @@ namespace NightfallMoonClock
                 Application.ThreadException += delegate { DesktopIcons.Show(); };
                 SystemEvents.SessionEnding += delegate { DesktopIcons.Show(); };
                 try { Application.Run(new ClockWindow()); }
-                finally { DesktopIcons.Show(); TaskbarCenter.SetEnabled(false); TaskbarLook.Stop(); }
+                finally { DesktopIcons.Show(); TaskbarCenter.SetEnabled(false); TaskbarLook.Stop(); LiveWallpaper.Shutdown(); }
             }
         }
     }
@@ -56,10 +56,19 @@ namespace NightfallMoonClock
         public string Weather = "auto";
         public string SkyColors = "night", SkyExtras = "none", MoonStyle = "large";
         public int LockAfter = 20;
+        public bool LockEnabled = true;
         public string Scene = "sky";
         public bool SkyPlaying = true, SkyParallax = true, SkyConstellations = true, SkyHourly = true;
         public bool ShowTonight = true;
         public bool AlignRight = true;
+        // live wallpaper
+        public bool WallpaperOn = false, WallPauseOnBattery = false, WallPauseSaver = true;
+        public string WallScene = "aurora", WallMode = "fixed";
+        public int WallPauseBelow = 20;
+        // scenes
+        public string TrainEvery = "few", RoomView = "random", TimeOfDay = "sunrise";
+        public bool WallClickStars = true, WallClickLights = true, WallClickWater = true, WallParallax = false;
+        public float TrainGap() { return TrainEvery == "loop" ? 0 : TrainEvery == "ten" ? 600 : 180; }
         public bool CenterTaskbar = true;
         public string TaskbarStyle = "clear", TaskbarMaximized = "acrylic";
         public int RightEdge = int.MinValue;
@@ -104,11 +113,18 @@ namespace NightfallMoonClock
                 s.Weather = S(d, "Weather", s.Weather); s.City = S(d, "City", "");
                 s.SkyColors = S(d, "SkyColors", s.SkyColors); s.SkyExtras = S(d, "SkyExtras", s.SkyExtras); s.MoonStyle = d.ContainsKey("RealMoon") ? S(d, "MoonStyle", s.MoonStyle) : "large";   // switch everyone to the real moon once
                 s.LockAfter = I(d, "LockAfter", s.LockAfter);
+                s.LockEnabled = B(d, "LockEnabled", s.LockEnabled);
                 s.Scene = S(d, "Scene", s.Scene);
                 s.SkyPlaying = B(d, "SkyPlaying", s.SkyPlaying); s.SkyParallax = B(d, "SkyParallax", s.SkyParallax);
                 s.SkyConstellations = B(d, "SkyConstellations", s.SkyConstellations);
                 s.SkyHourly = B(d, "SkyHourly", s.SkyHourly); s.ShowTonight = B(d, "ShowTonight", s.ShowTonight);
-                s.AlignRight = B(d, "AlignRight", s.AlignRight); s.CenterTaskbar = B(d, "CenterTaskbar", s.CenterTaskbar);
+                s.AlignRight = B(d, "AlignRight", s.AlignRight);
+                s.WallpaperOn = B(d, "WallpaperOn", s.WallpaperOn); s.WallScene = S(d, "WallScene", s.WallScene); s.WallMode = S(d, "WallMode", s.WallMode);
+                s.WallPauseOnBattery = B(d, "WallPauseOnBattery", s.WallPauseOnBattery); s.WallPauseSaver = B(d, "WallPauseSaver", s.WallPauseSaver);
+                s.WallPauseBelow = I(d, "WallPauseBelow", s.WallPauseBelow);
+                s.TrainEvery = S(d, "TrainEvery", s.TrainEvery); s.RoomView = S(d, "RoomView", s.RoomView); s.TimeOfDay = S(d, "TimeOfDay", s.TimeOfDay);
+                s.WallClickStars = B(d, "WallClickStars", s.WallClickStars); s.WallClickLights = B(d, "WallClickLights", s.WallClickLights);
+                s.WallClickWater = B(d, "WallClickWater", s.WallClickWater); s.WallParallax = B(d, "WallMouseShift", s.WallParallax); s.CenterTaskbar = B(d, "CenterTaskbar", s.CenterTaskbar);
                 s.TaskbarStyle = S(d, "TaskbarStyle", s.TaskbarStyle); s.TaskbarMaximized = S(d, "TaskbarMaximized", s.TaskbarMaximized); s.RightEdge = I(d, "RightEdge", s.RightEdge);
                 s.Lat = D(d, "Lat"); s.Lon = D(d, "Lon");
             }
@@ -132,9 +148,13 @@ namespace NightfallMoonClock
                     "SkyShooting=" + Bool(SkyShooting), "SkyShowers=" + Bool(SkyShowers), "SkyMoon=" + Bool(SkyMoon),
                     "SkyClock=" + Bool(SkyClock), "SkyThoughts=" + Bool(SkyThoughts),
                     "Weather=" + Weather, "City=" + City,
-                    "SkyColors=" + SkyColors, "SkyExtras=" + SkyExtras, "MoonStyle=" + MoonStyle, "RealMoon=1", "LockAfter=" + LockAfter,
+                    "SkyColors=" + SkyColors, "SkyExtras=" + SkyExtras, "MoonStyle=" + MoonStyle, "RealMoon=1", "LockAfter=" + LockAfter, "LockEnabled=" + Bool(LockEnabled),
                     "Scene=" + Scene, "SkyPlaying=" + Bool(SkyPlaying), "SkyParallax=" + Bool(SkyParallax), "SkyConstellations=" + Bool(SkyConstellations), "SkyHourly=" + Bool(SkyHourly), "ShowTonight=" + Bool(ShowTonight),
-                    "AlignRight=" + Bool(AlignRight), "CenterTaskbar=" + Bool(CenterTaskbar), "TaskbarStyle=" + TaskbarStyle, "TaskbarMaximized=" + TaskbarMaximized, "RightEdge=" + RightEdge,
+                    "AlignRight=" + Bool(AlignRight),
+                    "WallpaperOn=" + Bool(WallpaperOn), "WallScene=" + WallScene, "WallMode=" + WallMode,
+                    "WallPauseOnBattery=" + Bool(WallPauseOnBattery), "WallPauseSaver=" + Bool(WallPauseSaver), "WallPauseBelow=" + WallPauseBelow,
+                    "TrainEvery=" + TrainEvery, "RoomView=" + RoomView, "TimeOfDay=" + TimeOfDay,
+                    "WallClickStars=" + Bool(WallClickStars), "WallClickLights=" + Bool(WallClickLights), "WallClickWater=" + Bool(WallClickWater), "WallMouseShift=" + Bool(WallParallax), "CenterTaskbar=" + Bool(CenterTaskbar), "TaskbarStyle=" + TaskbarStyle, "TaskbarMaximized=" + TaskbarMaximized, "RightEdge=" + RightEdge,
                     "Lat=" + (double.IsNaN(Lat) ? "" : Lat.ToString(inv)), "Lon=" + (double.IsNaN(Lon) ? "" : Lon.ToString(inv))
                 });
             }
@@ -468,7 +488,7 @@ namespace NightfallMoonClock
         System.Windows.Forms.Timer idleTimer = new System.Windows.Forms.Timer();
         AwaySettingsForm awayForm;
         NotifyIcon tray = new NotifyIcon();
-        ToolStripMenuItem lockItem, h24Item, playingItem, startupItem, bigMoonItem, tonightItem, alignItem, centerItem;
+        ToolStripMenuItem lockItem, h24Item, playingItem, startupItem, bigMoonItem, tonightItem, alignItem, centerItem, wallItem;
         string playing;
         string lastRendered = "";
         float scale = 1f;
@@ -497,6 +517,7 @@ namespace NightfallMoonClock
             WeatherService.Refresh(settings, true);
             TaskbarCenter.SetEnabled(settings.CenterTaskbar);
             TaskbarLook.Configure(settings.TaskbarStyle, settings.TaskbarMaximized);
+            Load += delegate { LiveWallpaper.Apply(settings); };
         }
 
         protected override CreateParams CreateParams
@@ -533,6 +554,7 @@ namespace NightfallMoonClock
         // --------------------------------------------------------- away mode
         void CheckIdle()
         {
+            if (DateTime.Now.Second == 0) LiveWallpaper.CheckDay();
             WeatherService.Refresh(settings, false);
             if (SkyManager.Active) return;
             uint idle = NativeSky.IdleMilliseconds();
@@ -553,7 +575,16 @@ namespace NightfallMoonClock
         void OpenAwaySettings()
         {
             if (awayForm != null && !awayForm.IsDisposed) { awayForm.Activate(); return; }
-            awayForm = new AwaySettingsForm(settings, delegate { });
+            bool wasRight = settings.AlignRight;
+            awayForm = new AwaySettingsForm(settings, delegate
+            {
+                int rightEdge = Left + Width;
+                Render(true);
+                if (settings.AlignRight != wasRight) { if (settings.AlignRight) Left = rightEdge - Width; SavePosition(); wasRight = settings.AlignRight; Render(true); }
+                TaskbarCenter.SetEnabled(settings.CenterTaskbar);
+                TaskbarLook.Configure(settings.TaskbarStyle, settings.TaskbarMaximized);
+                SyncMenu();
+            });
             awayForm.Show();
         }
 
@@ -585,29 +616,20 @@ namespace NightfallMoonClock
             });
             tonightItem = new ToolStripMenuItem("Show tonight's constellation", null, delegate { settings.ShowTonight = !settings.ShowTonight; settings.Save(); SyncMenu(); Render(true); });
             startupItem = new ToolStripMenuItem("Start with Windows", null, delegate { SetStartup(!IsStartup()); SyncMenu(); });
-            menu.Items.Add(lockItem);
-            menu.Items.Add(h24Item);
-            menu.Items.Add(playingItem);
-            menu.Items.Add(bigMoonItem);
-            menu.Items.Add(tonightItem);
-            menu.Items.Add(alignItem);
-            menu.Items.Add(startupItem);
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(centerItem);
-            menu.Items.Add(LookMenu("Taskbar look", new string[] { "Clear", "Blur", "Acrylic (night tint)", "Windows default" },
-                new string[] { "clear", "blur", "acrylic", "off" }, true));
-            menu.Items.Add(LookMenu("When a window is maximized", new string[] { "Keep the same look", "Clear", "Blur", "Acrylic (night tint)", "Windows default" },
-                new string[] { "same", "clear", "blur", "acrylic", "normal" }, false));
-            menu.Items.Add(new ToolStripSeparator());
+            wallItem = new ToolStripMenuItem("Live wallpaper", null, delegate { settings.WallpaperOn = !settings.WallpaperOn; settings.Save(); LiveWallpaper.Apply(settings); SyncMenu(); });
             menu.Items.Add(new ToolStripMenuItem("Show the night sky now", null, delegate { SkyManager.Start(settings); }));
-            menu.Items.Add(new ToolStripMenuItem("Away mode settings...", null, delegate { OpenAwaySettings(); }));
+            menu.Items.Add(wallItem);
+            menu.Items.Add(lockItem);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(new ToolStripMenuItem("Settings...", null, delegate { OpenAwaySettings(); }));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Move back to the top right", null, delegate { ResetPosition(); }));
-            menu.Items.Add(new ToolStripMenuItem("Quit Moon Clock", null, delegate { DesktopIcons.Show(); TaskbarCenter.SetEnabled(false); TaskbarLook.Stop(); tray.Visible = false; Application.Exit(); }));
+            menu.Items.Add(new ToolStripMenuItem("Quit Moon Clock", null, delegate { DesktopIcons.Show(); TaskbarCenter.SetEnabled(false); TaskbarLook.Stop(); LiveWallpaper.Shutdown(); tray.Visible = false; Application.Exit(); }));
             playingItem.Enabled = NowPlaying.Supported;
             if (!NowPlaying.Supported) playingItem.Text = "Show what's playing (not available in this build)";
 
             tray.ContextMenuStrip = menu;
+            tray.DoubleClick += delegate { OpenAwaySettings(); };   // double-click the moon to open settings
             tray.Text = "Moon Clock";
             tray.Icon = MakeTrayIcon();
             tray.Visible = true;
@@ -644,6 +666,7 @@ namespace NightfallMoonClock
             bigMoonItem.Checked = settings.BigMoon;
             tonightItem.Checked = settings.ShowTonight;
             alignItem.Checked = settings.AlignRight;
+            if (wallItem != null) wallItem.Checked = settings.WallpaperOn;
             centerItem.Checked = settings.CenterTaskbar && TaskbarSupport.Supported;
             centerItem.Enabled = TaskbarSupport.Supported;
             if (!TaskbarSupport.Supported) centerItem.Text = "Center taskbar icons (Windows 10 only)";
@@ -689,8 +712,8 @@ namespace NightfallMoonClock
             settings.Save();
         }
 
-        const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        bool IsStartup()
+        public const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        public static bool IsStartup()
         {
             try
             {
@@ -699,7 +722,7 @@ namespace NightfallMoonClock
             }
             catch { return false; }
         }
-        void SetStartup(bool on)
+        public static void SetStartup(bool on)
         {
             try
             {
