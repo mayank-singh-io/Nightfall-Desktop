@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nightfall Desktop</title>
+<meta name="description" content="A quiet night sky for your Windows desktop: a moon clock, live wallpapers, and a new tab page.">
+<link rel="icon" href="nightfall-tab/icon48.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,200;9..144,300;9..144,400&family=Sora:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --night: #120c1c;
+    --deep: #1d1430;
+    --star: #ece4f4;
+    --soft: #b9a6e6;
+    --mist: #8d80a8;
+    --moon: #f1e6d0;
+    --line: rgba(236, 228, 244, 0.12);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--night); scroll-behavior: smooth; }
+  body { margin: 0; color: var(--star); font: 300 17px/1.7 "Sora", system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: var(--soft); text-underline-offset: 3px; }
+  a:hover { color: var(--star); }
+  :focus-visible { outline: 2px solid var(--moon); outline-offset: 3px; border-radius: 6px; }
+
+  /* ---------- the sky ---------- */
+  .sky { position: relative; height: 100vh; height: 100svh; min-height: 560px; overflow: hidden; user-select: none; -webkit-user-select: none; }
+  .sky canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: default; }
+  .sky .fallback { position: absolute; inset: 0; background: center / cover no-repeat url("nightfall-tab/scenes/thumbs/aurora.jpg"); filter: blur(2px); opacity: 0.9; }
+  .title { position: absolute; left: clamp(20px, 6vw, 88px); bottom: clamp(150px, 24vh, 230px); max-width: 640px; pointer-events: none; text-shadow: 0 2px 30px rgba(10, 6, 18, 0.7); }
+  .title h1 { margin: 0; font: 200 clamp(64px, 12vw, 168px)/0.86 "Fraunces", Georgia, serif; font-variation-settings: "opsz" 144; letter-spacing: -0.035em; }
+  .title p { margin: 18px 0 0; font-size: clamp(16px, 1.6vw, 19px); color: var(--star); max-width: 30em; }
+  .title .hint { margin-top: 10px; font-size: 14px; color: var(--soft); }
+  .strip { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px clamp(12px, 6vw, 88px) calc(18px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; background: linear-gradient(to top, rgba(12, 8, 20, 0.75), transparent); }
+  .strip::-webkit-scrollbar { display: none; }
+  .strip button { flex: none; width: 112px; padding: 0; border: 0; background: none; color: var(--star); cursor: pointer; text-align: left; font: 400 12px/1.3 "Sora", sans-serif; }
+  .strip img { display: block; width: 112px; height: 63px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); opacity: 0.72; transition: opacity 0.2s, border-color 0.2s; }
+  .strip span { display: block; margin-top: 6px; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .strip button:hover img, .strip button[aria-pressed="true"] img { opacity: 1; border-color: var(--moon); }
+  .strip button[aria-pressed="true"] span { opacity: 1; }
+
+  /* ---------- the page below ---------- */
+  main { max-width: 1040px; margin: 0 auto; padding: 0 clamp(20px, 5vw, 40px) 80px; }
+  .lede { max-width: 640px; padding: 96px 0 40px; font-size: clamp(19px, 2vw, 23px); line-height: 1.6; color: var(--star); }
+  section { padding: 56px 0; border-top: 1px solid var(--line); }
+  h2 { margin: 0 0 18px; font: 300 clamp(32px, 4vw, 46px)/1.1 "Fraunces", Georgia, serif; letter-spacing: -0.02em; }
+  h3 { margin: 0 0 6px; font: 400 21px/1.3 "Fraunces", Georgia, serif; }
+  .text { max-width: 640px; }
+  .text p { margin: 0 0 14px; color: #d8cfe6; }
+  .part { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(20px, 4vw, 48px); align-items: center; padding: 26px 0; }
+  .part p { margin: 0; color: #d8cfe6; }
+  .part img, figure img { width: 100%; height: auto; display: block; border-radius: 12px; border: 1px solid var(--line); }
+  figure { margin: 26px 0 0; }
+  figcaption { margin-top: 10px; font-size: 14px; color: var(--mist); }
+  .play { columns: 2 280px; column-gap: 40px; margin: 8px 0 0; padding: 0; list-style: none; }
+  .play li { break-inside: avoid; padding: 0 0 14px; color: #d8cfe6; }
+  .play b { font-weight: 500; color: var(--star); }
+  .install { margin: 22px 0 8px; display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; }
+  .install code { flex: 1 1 420px; min-width: 0; overflow-x: auto; white-space: nowrap; padding: 14px 16px; border-radius: 10px; background: var(--deep); border: 1px solid var(--line); font: 14px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--star); }
+  .install button { flex: none; padding: 0 20px; border-radius: 10px; border: 0; background: var(--moon); color: #1b1226; font: 500 15px "Sora", sans-serif; cursor: pointer; }
+  .install button:hover { background: #fff6e4; }
+  ol.steps { margin: 18px 0 0; padding-left: 22px; color: #d8cfe6; }
+  ol.steps li { padding: 0 0 10px 4px; }
+  .note { font-size: 15px; color: var(--mist); }
+  footer { max-width: 1040px; margin: 0 auto; padding: 32px clamp(20px, 5vw, 40px) 56px; border-top: 1px solid var(--line); font-size: 14px; color: var(--mist); display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
+
+  @media (max-width: 760px) {
+    .part { grid-template-columns: 1fr; }
+    .title { bottom: 150px; }
+    .strip button, .strip img { width: 92px; }
+    .strip img { height: 52px; }
+  }
+</style>
+</head>
+<body>
+  <header class="sky" aria-label="A live night scene you can play with">
+    <div class="fallback" aria-hidden="true"></div>
+    <canvas id="scene" aria-hidden="true"></canvas>
+    <div class="title">
+      <h1>nightfall</h1>
+      <p>A quiet night sky for your Windows desktop. A moon clock, live wallpapers that breathe behind your icons, and a new tab page to match.</p>
+      <p class="hint" id="hint">Click the sky for a shooting star. Hold it for a meteor shower. Double-click it for rain.</p>
+    </div>
+    <nav class="strip" id="strip" aria-label="Choose a scene"></nav>
+  </header>
+
+  <main>
+    <p class="lede">Nightfall turns a Windows&nbsp;10 PC into a calm, moonlit place. Everything is handmade, light on your computer, and free for personal use.</p>
+
+    <section aria-labelledby="parts">
+      <h2 id="parts">Three small things</h2>
+      <div class="part">
+        <div>
+          <h3>The moon clock</h3>
+          <p>A clock that sits on your desktop with tonight's moon phase, the best constellation to look for, and what's playing. When you step away, your desktop drifts into a night sky.</p>
+        </div>
+        <img src="screenshots/moon-clock.png" alt="The moon clock on a dark purple desktop, showing the time, the date and the moon phase" loading="lazy">
+      </div>
+      <div class="part">
+        <div>
+          <h3>Live wallpapers</h3>
+          <p>Eighteen scenes play behind your icons: rain on a city, a porch in the forest, northern lights over a lake. They pause the moment a window covers them, so they cost nothing while you work.</p>
+        </div>
+        <img src="screenshots/scenes-v1.4.png" alt="Six of the scenes: a porch, a meadow, waterfalls, a mountain lake at dawn, a snowy village and the Earth from space" loading="lazy">
+      </div>
+      <div class="part">
+        <div>
+          <h3>A new tab page</h3>
+          <p>For Brave and Chrome: the same scenes, a clock, your favourite sites, live weather and a short line to read before you get going.</p>
+        </div>
+        <img src="screenshots/newtab-scenes.png" alt="The new tab page with a scene behind the clock and search box" loading="lazy">
+      </div>
+    </section>
+
+    <section aria-labelledby="sky">
+      <h2 id="sky">A sky that follows yours</h2>
+      <div class="text">
+        <p>Each scene shows tonight's real moon, turns to dawn colours around your actual sunrise, and follows the weather where you live: rain, storms with silent lightning, snow, mist and drifting cloud. On Diwali, lanterns rise and diyas float on the water; on New Year's Eve, soft fireworks bloom over the hills.</p>
+      </div>
+      <figure>
+        <img src="screenshots/night-and-dawn.png" alt="Three scenes shown twice, at night and at dawn" loading="lazy">
+        <figcaption>The same scenes at night, and at dawn.</figcaption>
+      </figure>
+    </section>
+
+    <section aria-labelledby="play">
+      <h2 id="play">Things to try</h2>
+      <ul class="play">
+        <li><b>Catch a shooting star</b> by clicking it as it falls, and make a wish.</li>
+        <li><b>Hold the sky</b> for a moment to start a meteor shower.</li>
+        <li><b>Drag across the stars</b> to draw your own constellation.</li>
+        <li><b>Click the moon</b> to see its phase and what's up tonight.</li>
+        <li><b>Hold Ctrl and move the mouse:</b> fireflies drift to you, grass parts, birds scatter.</li>
+        <li><b>Double-click the sky</b> for a minute of rain, or snow.</li>
+        <li><b>Click the cat</b> on the porch or the rooftop.</li>
+        <li><b>Keep an eye out</b> for a comet, an owl, a fox or a whale.</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="get">
+      <h2 id="get">Get it</h2>
+      <div class="text">
+        <p>Open PowerShell and paste this line. The installer asks before it changes anything, and builds the clock on your own PC, so there's nothing unknown to run.</p>
+      </div>
+      <div class="install">
+        <code id="cmd">irm https://raw.githubusercontent.com/mayank-singh-io/Nightfall-Desktop/main/install.ps1 | iex</code>
+        <button type="button" id="copy">Copy</button>
+      </div>
+      <ol class="steps">
+        <li>Press Start, type <i>PowerShell</i>, and open it.</li>
+        <li>Paste the line above and press Enter.</li>
+        <li>Answer the few questions it asks. The moon clock starts by itself when it's done.</li>
+        <li>For the new tab page, open <i>brave://extensions</i>, turn on Developer mode, and load the <i>nightfall-tab</i> folder.</li>
+      </ol>
+      <p class="note">Prefer to look first? <a href="https://github.com/mayank-singh-io/Nightfall-Desktop/releases/latest">Download the latest release</a> or <a href="https://github.com/mayank-singh-io/Nightfall-Desktop">browse the code</a>. To remove everything later, run the same line with <i>uninstall.ps1</i> instead.</p>
+    </section>
+  </main>
+
+  <footer>
+    <span>Nightfall Desktop, by <a href="https://github.com/mayank-singh-io">mayank-singh-io</a>. Free for noncommercial use.</span>
+    <span>Moon image: NASA Scientific Visualization Studio.</span>
+  </footer>
+
+  <script src="nightfall-tab/scenes.js"></script>
+  <script>
+  (() => {
+    const canvas = document.getElementById("scene"), strip = document.getElementById("strip");
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const start = ["aurora", "porch", "falls", "rooftop", "meadow"][Math.floor(Math.random() * 5)];
+    const options = { base: "nightfall-tab/", parallax: false, timeOfDay: "night", realWeather: "clear", hFireflies: true, hStars: true, hCat: true, hWater: true, hGrassSnow: true, hBirds: true, hLamps: true, trailStyle: "dust", moonInfo: () => ["The moon", "Tonight's real phase shows on your desktop"] };
+    let current = null, last = 0;
+
+    async function show(key) {
+      if (key === current) return;
+      current = key;
+      for (const b of strip.children) b.setAttribute("aria-pressed", String(b.dataset.key === key));
+      try { await NightScene.start(key, canvas, options); NightScene.resize(); } catch (e) { /* the blurred picture behind stays visible */ }
+    }
+    NightScene.KEYS.forEach((key, i) => {
+      const b = document.createElement("button"); b.type = "button"; b.dataset.key = key; b.setAttribute("aria-pressed", "false");
+      b.innerHTML = `<img src="nightfall-tab/scenes/thumbs/${key}.jpg" alt="" loading="lazy"><span>${NightScene.NAMES[i]}</span>`;
+      b.addEventListener("click", () => show(key)); strip.appendChild(b);
+    });
+
+    function frame(t) {
+      if (NightScene.active) {
+        const dt = Math.min(t - last, 100) / 1000; last = t;
+        NightScene.step(t, dt, true); NightScene.draw(t, -1e9);
+      }
+      if (!still) requestAnimationFrame(frame);
+    }
+    show(start).then(() => { if (still) { setTimeout(() => NightScene.draw(performance.now(), -1e9), 300); document.getElementById("hint").textContent = "Animations are paused because your system prefers reduced motion."; } else requestAnimationFrame((t) => { last = t; frame(t); }); });
+    addEventListener("resize", () => NightScene.active && NightScene.resize());
+
+    // play: hovering always works here; clicks, holds and drags go to the scene
+    const onSky = (e) => e.target === canvas, top = () => canvas.getBoundingClientRect().top;   // positions inside the sky, even when scrolled a little
+    canvas.addEventListener("mousemove", (e) => NightScene.setHover(e.clientX, e.clientY - top(), true));
+    canvas.addEventListener("mouseleave", () => NightScene.setHover(-1000, -1000, false));
+    canvas.addEventListener("mousedown", (e) => { if (e.button === 0) { if (e.detail > 1) e.preventDefault(); NightScene.pointerDown(e.clientX, e.clientY - top()); } });
+    addEventListener("mouseup", () => NightScene.pointerUp());
+    canvas.addEventListener("click", (e) => { if (onSky(e)) NightScene.click(e.clientX, e.clientY - top()); });
+
+    document.getElementById("copy").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      try { await navigator.clipboard.writeText(document.getElementById("cmd").textContent); btn.textContent = "Copied"; }
+      catch (err) { getSelection().selectAllChildren(document.getElementById("cmd")); btn.textContent = "Press Ctrl+C"; }
+      setTimeout(() => (btn.textContent = "Copy"), 2000);
+    });
+  })();
+  </script>
+</body>
+</html>

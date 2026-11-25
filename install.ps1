@@ -26,7 +26,7 @@
     }
 
     Say ""
-    Say "  Nightfall Desktop v1.4.0" Magenta
+    Say "  Nightfall Desktop v1.5.0" Magenta
     Say "  A calm night-sky setup for Windows 10`n" DarkGray
 
     if ([Environment]::OSVersion.Version.Major -lt 10) { Say "This needs Windows 10 or later." Red; return }

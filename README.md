@@ -1,5 +1,7 @@
 # Nightfall Desktop
 
+**See it live:** https://mayank-singh-io.github.io/Nightfall-Desktop/
+
 A calm, Mac-inspired night-sky setup for Windows 10: a desktop clock with tonight's real moon, a full-screen sky that appears when you step away, and a matching new tab page and browser theme. Everything is lightweight, needs nothing extra installed, and can be turned off or undone.
 
 **Quick install** (open PowerShell and paste):
@@ -55,6 +57,10 @@ When you're idle, your desktop icons hide first, then a full-screen night sky fa
 - **Nature scenes:** a Porch in the Forest (lantern light, steam from your mug, fireflies), a Moonlit Meadow (tall grass swaying in the wind), Wide Falls (streams pouring over a mossy ledge into a pool), and a Mountain Lake at Dawn (mist drifting over the water). That makes **18 scenes**.
 
   ![Nature scenes](screenshots/scenes-v1.4.png)
+- **Special days:** lanterns and diyas on Diwali, colours on Holi, soft fireworks on New Year's Eve, and a little something on your birthday.
+- **More than one screen:** a different scene on each, and you can save any scene as a 4K picture.
+- **A real sky:** scenes follow the real weather where you are (rain, storms, snow, mist, clouds) and show tonight's real moon phase. When Windows starts, the night sky gently fades in.
+- **Play:** hover to draw fireflies toward you, make stars sparkle and grass part; hold the sky for a meteor shower; click the moon for tonight's sky; catch a shooting star; draw your own constellations; double-click for rain or snow; and watch for rare surprises (a comet, an owl, a fox, a whale). Shooting stars leave sparkling trails: glittering dust, a glowing ribbon or sparkler sparks. Every bit can be switched off in the Play tab.
 - **Dawn versions:** every scene turns to sunrise colours around the real sunrise where you are, worked out from your city with no internet needed. Choose in Settings: follow the sunrise, the sunrise and sunset, always night, or always dawn.
 
   ![Night and dawn](screenshots/night-and-dawn.png)

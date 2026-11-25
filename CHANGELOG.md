@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.5.0 (November 24, 2026)
+
+### New: Play
+A new **Play** tab (in the Moon Clock settings and in the new tab's settings) with a switch for everything below.
+
+- **Hover** (while holding Ctrl, or always on): fireflies drift toward you, stars sparkle as you pass, the cat notices you, ripples follow you on water, grass parts and snow swirls around you, birds scatter, and lamps glow brighter
+- **Clicks:** hold the sky for a meteor shower; click the moon for its phase and tonight's sky; catch a shooting star for a little wish; send the train; the cat and steaming mugs react; drag across stars to draw your own constellation; double-click the sky for a minute of rain (or snow)
+- **Rare surprises:** now and then, a comet, an owl, a fox or a whale
+- The cat now has a living tail that swishes
+- **Sparkling trails** behind every shooting star: glittering dust, a glowing ribbon or sparkler sparks, in a mix of colours, lasting about 1, 3 or 6 seconds (Play tab)
+
+### New: special days, more screens, pictures, music
+- **Special days:** diyas floating on the water and lanterns rising on Diwali (three days), drifting clouds of colour on Holi (two days), soft fireworks on New Year's Eve (blooms, golden willows and far-off bursts), and lanterns with a heart of stars on your birthday. Each can be switched off, and your birthday is set in the Play tab
+- **A different scene on each screen** when you have more than one monitor (or the same everywhere, in Settings → Wallpaper)
+- **Save the scene as a 4K picture:** from the tray menu, or the new tab's Scene settings
+- **Music glow:** while music plays, a warm glow rises and lights, fireflies and the aurora brighten a little
+- Water is now marked in Firefly Lake, Northern Lights and Ocean Shore, so ripples and diyas work there too
+- **A website** (index.html) that shows the scenes live, for GitHub Pages
+
+### New: a real sky
+- **Real weather in the scenes:** rain, storms (with soft, silent lightning), snow, mist and drifting clouds follow the weather in your saved city, using the forecast the clock already downloads. Always-rainy and snowy scenes keep their own weather
+- **Tonight's real moon:** every scene's moon shows the actual phase, and the dark side melts into the sky
+- **Lighter weather checks:** at most once an hour, only while a scene is showing, and never on a metered connection or in battery saver (the new tab skips when data saver is on or the battery is at 20% or less)
+- **Gentle start:** when Windows starts, the night sky fades in, stars appearing one by one, then the desktop appears (a few seconds; can be switched off in Settings → Clock)
+
+### Changed
+- Northern Lights: the aurora visibly reshapes every few seconds and gently pulses
+
+## v1.4.1 (November 24, 2026)
+
+### Changed
+- Northern Lights: the aurora now visibly reshapes every few seconds and gently pulses brighter and dimmer, instead of changing too slowly to notice
+
 ## v1.4.0 (November 24, 2026)
 
 ### New
