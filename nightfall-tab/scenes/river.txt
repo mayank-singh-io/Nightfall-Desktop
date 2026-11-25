@@ -222,3 +222,6 @@ shimmer 868.7 994.3 1045.4
 shimmer 1193.6 1249.6 896.2
 window 1549.1 861.9 18.4 20.7
 dawn river-dawn.jpg
+moon 1420.8 216 38
+surprise comet
+surprise owl 200 260 1700 420

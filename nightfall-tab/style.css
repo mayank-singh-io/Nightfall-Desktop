@@ -404,8 +404,22 @@ body.scene-on #thought:empty { display: none; }
 #settings .scene-grid button span { display: block; padding: 5px 4px 6px; line-height: 1.25; }
 #settings .scene-grid button:hover { border-color: rgba(255, 255, 255, 0.28); }
 #settings .scene-grid button[aria-checked="true"] { border: 2px solid #c9b6e4; color: var(--text); }
-.scene-grid.off { opacity: 0.45; pointer-events: none; }
+.scene-grid.off { opacity: 0.55; }
+.scene-grid.off button:hover, .scene-grid.off button:focus-visible { opacity: 1; }
+.scene-grid.off:hover { opacity: 0.85; }
 
 /* panels and corner controls always sit above the page content (and above a scene's shading) */
 #settings, #open-settings, #make-meteors, .corner-btn { z-index: 10; }
 #notes-wrap { z-index: 10; }
+
+/* ---------- Play tab: tidy two-column switches ---------- */
+.play-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin: 8px 0 4px; }
+.play-grid label { font-size: 12.5px; line-height: 1.3; display: flex; gap: 6px; align-items: flex-start; }
+.play-head { margin: 14px 0 2px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--soft); }
+#settings .settings-tabs button { font-size: 12.5px; }
+
+.birth-row { display: flex; gap: 8px; }
+.birth-row select:last-child { width: 84px; flex: none; }
+.save-picture { margin: 6px 0 12px; width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line, rgba(255,255,255,0.14)); background: rgba(255,255,255,0.06); color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+.save-picture:hover:not(:disabled) { background: rgba(255,255,255,0.1); }
+.save-picture:disabled { opacity: 0.7; cursor: default; }

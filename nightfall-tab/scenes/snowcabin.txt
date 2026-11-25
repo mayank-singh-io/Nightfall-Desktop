@@ -154,3 +154,7 @@ smoke 1270.0 705.0 13.7 -14
 window 1146.6 817.3 47.2 42.0
 window 1225.3 817.3 42.0 42.0
 dawn snowcabin-dawn.jpg
+moon 1497.6 172.8 34
+surprise comet
+surprise owl 150 280 1750 420
+surprise fox 0 1920 935

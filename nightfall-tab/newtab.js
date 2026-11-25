@@ -16,6 +16,29 @@ const DEFAULTS = {
   tabSceneKey: "aurora",
   trainEvery: "few",
   timeOfDay: "sunrise",
+  sceneWeather: true,
+  festDiwali: true, festHoli: true, festNewYear: true, festBirthday: true,
+  birthMonth: 0, birthDay: 1,
+  realMoon: true,
+  playHover: "ctrl",
+  trailStyle: "dust",
+  trailLength: "linger",
+  playFireflies: true,
+  playStars: true,
+  playCat: true,
+  playWater: true,
+  playGrassSnow: true,
+  playBirds: true,
+  playLamps: true,
+  playMeteorHold: true,
+  playMoon: true,
+  playTrain: true,
+  playCatMug: true,
+  playCatch: true,
+  playDraw: true,
+  playWeather: true,
+  playSurprises: true,
+
   roomView: "random",
   clickStars: true, clickLights: true, clickWater: true, mouseShift: false,
   notesPosition: "pos-bl",
@@ -266,6 +289,28 @@ function drawMoon(ctx) {
 
 // ================= Weather =================
 let weatherKind = "clear";
+// Special days. Diwali and Holi follow the lunar calendar; dates from Drik Panchang (checked through 2033).
+const DIWALI = ["2026-11-08", "2027-10-29", "2028-10-17", "2029-11-05", "2030-10-26", "2031-11-14", "2032-11-02", "2033-10-22"];
+const HOLI = ["2026-03-04", "2027-03-22", "2028-03-11", "2029-03-01", "2030-03-20", "2031-03-09", "2032-03-27", "2033-03-16", "2034-03-05", "2035-03-24"];
+function festivalToday(now = new Date()) {
+  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const near = (list, before, after) => list.some((iso) => { const [y, m, d] = iso.split("-").map(Number), diff = Math.round((day - new Date(y, m - 1, d)) / 86400000); return diff >= -before && diff <= after; });
+  if (settings.festBirthday && +settings.birthMonth > 0 && now.getMonth() + 1 === +settings.birthMonth && now.getDate() === +settings.birthDay) return "birthday";
+  if (settings.festDiwali && near(DIWALI, 1, 1)) return "diwali";
+  if (settings.festHoli && near(HOLI, 1, 0)) return "holi";
+  if (settings.festNewYear && now.getMonth() === 11 && now.getDate() === 31) return "newyear";
+  return null;
+}
+let lastFestival = festivalToday();
+setInterval(() => { const f = festivalToday(); if (f !== lastFestival) { lastFestival = f; if (NightScene.active) NightScene.setOptions({ festival: f }); } }, 60000);
+
+function sceneWeatherKind() {
+  if (settings.sceneWeather === false) return "clear";
+  if (settings.weatherMode !== "auto") return settings.weatherMode;   // a weather style chosen by hand wins
+  const w = readJSON("nightfall-weather", null), code = w && typeof w.code === "number" ? w.code : -1;
+  if (code === 2 || code === 3) return "cloudy";
+  return code >= 0 ? kindFromCode(code) : "clear";
+}
 function kindFromCode(code) {
   if (code === 45 || code === 48) return "fog";
   if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return "rain";
@@ -281,12 +326,23 @@ function currentWeatherKind() {
   return w && typeof w.code === "number" ? kindFromCode(w.code) : "clear";
 }
 
+// Skip automatic weather checks when the browser's data saver is on, or when running
+// on battery at 20% or less (when Windows turns battery saver on by default).
+async function shouldSaveData() {
+  try {
+    if (navigator.connection && navigator.connection.saveData) return true;
+    if (navigator.getBattery) { const b = await navigator.getBattery(); if (!b.charging && b.level <= 0.2) return true; }
+  } catch (e) {}
+  return false;
+}
+
 async function refreshWeather(force = false) {
   updateWeatherStatus();
   if (settings.weatherMode !== "auto" || !settings.city) return;
   const cached = readJSON("nightfall-weather", null);
-  const fresh = cached && cached.lat === settings.city.lat && Date.now() - cached.fetched < 30 * 60000;
+  const fresh = cached && cached.lat === settings.city.lat && Date.now() - cached.fetched < 60 * 60000;   // at most once an hour
   if (fresh && !force) return;
+  if (!force && (await shouldSaveData())) return;   // data saver on, or low battery: keep the last forecast
   try {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${settings.city.lat}&longitude=${settings.city.lon}` +
       `&current=weather_code&daily=sunrise,sunset&timezone=auto&forecast_days=1`;
@@ -366,6 +422,7 @@ function buildFogTexture() {
 
 function setWeather(kind) {
   weatherKind = kind;
+  if (NightScene.active) NightScene.setOptions({ realWeather: sceneWeatherKind() });
   if (NightScene.active && settings.tabScene === "fixed" && sceneBase === "room" && settings.roomView === "weather" && roomWeatherSeen !== kind) {
     roomWeatherSeen = kind; applyTabScene();
   }
@@ -874,7 +931,11 @@ function syncOptions() {
   $("opt-real-constellations").checked = settings.realConstellations;
   $("opt-tab-scene").value = settings.tabScene;
   $("opt-tab-scene-key").value = settings.tabSceneKey;
-  $("opt-train").value = settings.trainEvery; $("opt-room").value = settings.roomView; $("opt-time").value = settings.timeOfDay;
+  for (const key of ["festDiwali", "festHoli", "festNewYear", "festBirthday"]) $("opt-" + key).checked = settings[key] !== false;
+  $("opt-birth-month").value = String(settings.birthMonth || 0); $("opt-birth-day").value = String(settings.birthDay || 1);
+  $("opt-hover").value = settings.playHover; $("opt-trail").value = settings.trailStyle; $("opt-trail-len").value = settings.trailLength;
+  for (const key of ["playFireflies", "playStars", "playCat", "playWater", "playGrassSnow", "playBirds", "playLamps", "playMeteorHold", "playMoon", "playTrain", "playCatMug", "playCatch", "playDraw", "playWeather", "playSurprises"]) { const el = $("opt-" + key); if (el) el.checked = settings[key] !== false; }
+  $("opt-train").value = settings.trainEvery; $("opt-room").value = settings.roomView; $("opt-time").value = settings.timeOfDay; $("opt-scene-weather").checked = settings.sceneWeather !== false; $("opt-real-moon").checked = settings.realMoon !== false;
   $("opt-click-stars").checked = settings.clickStars; $("opt-click-lights").checked = settings.clickLights;
   $("opt-click-water").checked = settings.clickWater; $("opt-parallax").checked = settings.mouseShift;
   syncSceneControls();
@@ -948,7 +1009,12 @@ function sceneOptions() {
     trainGap: settings.trainEvery === "loop" ? 0 : settings.trainEvery === "ten" ? 600 : 180,
     roomView: settings.roomView, weather: typeof weatherKind === "string" ? weatherKind : "clear",
     timeOfDay: settings.timeOfDay, lat: settings.city ? settings.city.lat : undefined, lon: settings.city ? settings.city.lon : undefined,
-    stars: settings.clickStars, lights: settings.clickLights, water: settings.clickWater, parallax: settings.mouseShift
+    stars: settings.clickStars, lights: settings.clickLights, water: settings.clickWater, parallax: settings.mouseShift,
+    hFireflies: settings.playFireflies, hStars: settings.playStars, hCat: settings.playCat, hWater: settings.playWater, hGrassSnow: settings.playGrassSnow, hBirds: settings.playBirds, hLamps: settings.playLamps,
+    cMeteorHold: settings.playMeteorHold, cMoon: settings.playMoon, cTrain: settings.playTrain, cCatMug: settings.playCatMug, cCatch: settings.playCatch, cDraw: settings.playDraw, cWeather: settings.playWeather, surprises: settings.playSurprises,
+    trailStyle: settings.trailStyle, trailLength: settings.trailLength,
+    realWeather: sceneWeatherKind(), moonPhase: settings.realMoon ? realMoonPhase() : -1, festival: festivalToday(),
+    moonInfo: moonCardLines
   };
 }
 // clicks on the scene itself (not on the search box, sites, notes or settings)
@@ -957,7 +1023,44 @@ document.addEventListener("click", (e) => {
   if (e.target.closest("input, button, a, select, textarea, label, #settings, #notes, #notes-mini, form, .tile")) return;
   NightScene.click(e.clientX, e.clientY);
 });
-document.addEventListener("mousemove", (e) => { if (NightScene.active) NightScene.pointer((e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1); });
+// hover effects (while holding Ctrl, or always), press-and-hold and dragging on the scene
+let sceneMouse = { x: -1000, y: -1000 }, ctrlDown = false;
+const onScene = (el) => !(el && el.closest && el.closest("input, button, a, select, textarea, label, #settings, #notes, #notes-mini, form, .tile, aside"));
+function hoverActive() { return settings.playHover === "always" || (settings.playHover === "ctrl" && ctrlDown); }
+document.addEventListener("mousemove", (e) => {
+  if (!NightScene.active) return;
+  sceneMouse = { x: e.clientX, y: e.clientY }; ctrlDown = e.ctrlKey;
+  NightScene.pointer((e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1);
+  NightScene.setHover(e.clientX, e.clientY, hoverActive() && onScene(e.target));
+});
+for (const type of ["keydown", "keyup"]) document.addEventListener(type, (e) => { if (e.key === "Control" && NightScene.active) { ctrlDown = type === "keydown"; NightScene.setHover(sceneMouse.x, sceneMouse.y, hoverActive()); } });
+document.addEventListener("mousedown", (e) => {
+  if (!NightScene.active || e.button !== 0 || !onScene(e.target)) return;
+  if (e.detail > 1) e.preventDefault();   // a double-click on the scene shouldn't select the clock's text
+  NightScene.pointerDown(e.clientX, e.clientY);
+});
+document.addEventListener("mouseup", (e) => { if (NightScene.active && e.button === 0) NightScene.pointerUp(); });
+function moonCardLines() {
+  const p = realMoonPhase(), name = moonName(p), lit = Math.round(((1 - Math.cos(2 * Math.PI * p)) / 2) * 100);
+  const toFull = ((((0.5 - p) % 1) + 1) % 1) * 29.53, toNew = ((((1 - p) % 1) + 1) % 1) * 29.53;
+  return [name, `${lit}% lit`, name === "Full moon" ? `New moon in ${Math.max(1, Math.round(toNew))} days` : `Full moon in ${Math.max(1, Math.round(toFull))} days`];
+}
+$("opt-hover").addEventListener("change", (e) => { settings.playHover = e.target.value; saveSettings(); });
+for (const key of ["festDiwali", "festHoli", "festNewYear", "festBirthday"]) $("opt-" + key).addEventListener("change", (e) => { settings[key] = e.target.checked; saveSettings(); NightScene.setOptions(sceneOptions()); });
+for (const [id, key] of [["opt-birth-month", "birthMonth"], ["opt-birth-day", "birthDay"]]) $(id).addEventListener("change", (e) => { settings[key] = +e.target.value; saveSettings(); NightScene.setOptions(sceneOptions()); });
+$("save-picture").addEventListener("click", async () => {
+  const btn = $("save-picture"); if (!NightScene.active) { btn.textContent = "Pick a scene first"; return; }
+  btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const blob = await NightScene.snapshot(), a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `Nightfall ${sceneBase || "scene"} ${new Date().toISOString().slice(0, 10)}.png`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000); btn.textContent = "Saved to your downloads";
+  } catch (e) { btn.textContent = "Couldn't save the picture"; }
+  setTimeout(() => { btn.disabled = false; btn.textContent = "Save the scene as a 4K picture"; }, 2500);
+});
+for (const [id, key] of [["opt-trail", "trailStyle"], ["opt-trail-len", "trailLength"]]) $(id).addEventListener("change", (e) => { settings[key] = e.target.value; saveSettings(); NightScene.setOptions(sceneOptions()); });
+for (const key of ["playFireflies", "playStars", "playCat", "playWater", "playGrassSnow", "playBirds", "playLamps", "playMeteorHold", "playMoon", "playTrain", "playCatMug", "playCatch", "playDraw", "playWeather", "playSurprises"]) { const el = $("opt-" + key); if (el) el.addEventListener("change", (e) => { settings[key] = e.target.checked; saveSettings(); NightScene.setOptions(sceneOptions()); }); }
+for (const [id, key] of [["opt-scene-weather", "sceneWeather"], ["opt-real-moon", "realMoon"]]) $(id).addEventListener("change", (e) => { settings[key] = e.target.checked; saveSettings(); NightScene.setOptions(sceneOptions()); });
 $("opt-time").addEventListener("change", (e) => { settings.timeOfDay = e.target.value; saveSettings(); NightScene.setOptions(sceneOptions()); });
 for (const [id, key] of [["opt-train", "trainEvery"], ["opt-room", "roomView"]]) $(id).addEventListener("change", (e) => { settings[key] = e.target.value; saveSettings(); applyTabScene(); });
 for (const [id, key] of [["opt-click-stars", "clickStars"], ["opt-click-lights", "clickLights"], ["opt-click-water", "clickWater"], ["opt-parallax", "mouseShift"]])
@@ -1014,6 +1117,8 @@ function buildSceneGrid() {
     const label = document.createElement("span"); label.textContent = NightScene.NAMES[i];
     b.append(img, label);
     b.addEventListener("click", () => {
+      // picking a scene while the background is the classic starfield (or a different scene each tab) switches to that scene
+      const mode = $("opt-tab-scene"); if (mode && mode.value !== "fixed") { mode.value = "fixed"; mode.dispatchEvent(new Event("change")); }
       sel.value = k; sel.dispatchEvent(new Event("change"));
       grid.querySelectorAll("button").forEach((x) => x.setAttribute("aria-checked", String(x === b)));
     });

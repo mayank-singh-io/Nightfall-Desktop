@@ -185,3 +185,7 @@ shimmer 258.7 372.6 662.8
 shimmer 605.1 724.9 660.5
 fireflies 77 518 1843 1004 60
 dawn fireflies-dawn.jpg
+moon 576 172.8 26
+surprise comet
+surprise owl 150 300 1750 500
+water 0 639 1920 934

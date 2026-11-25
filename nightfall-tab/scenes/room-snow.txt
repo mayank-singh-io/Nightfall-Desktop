@@ -87,3 +87,4 @@ pulse 844.8 885.6 150 170 255 40
 clock 0.14
 snow light
 dawn room-snow-dawn.jpg
+moon 1152 216 30

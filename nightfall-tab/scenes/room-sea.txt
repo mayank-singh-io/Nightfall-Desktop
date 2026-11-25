@@ -156,3 +156,4 @@ waves 422 1498 745.2 9 3
 bob 1344.0 559.6 255 205 130
 water 422 562 1498 734
 dawn room-sea-dawn.jpg
+moon 1152 302.4 34

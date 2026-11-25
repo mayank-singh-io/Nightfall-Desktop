@@ -167,3 +167,4 @@ shimmer 472.9 584.7 673.7
 shimmer 1298.2 1349.2 682.3
 water 422 605 1498 778
 dawn room-lake-dawn.jpg
+moon 1190.4 237.6 30

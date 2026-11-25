@@ -203,3 +203,6 @@ shimmer 96.3 177.5 743.6
 shimmer 1609.1 1707.0 889.1
 water 0 728 1920 1080
 dawn falls-dawn.jpg
+moon 384 129.6 32
+surprise comet
+surprise owl 150 230 1750 360

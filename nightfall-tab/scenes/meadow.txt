@@ -152,3 +152,7 @@ star 1837.6 407.4 0.55
 sway meadow-grass.png 648 7
 fireflies 77 626 1843 972 45
 dawn meadow-dawn.jpg
+moon 460.8 194.4 40
+surprise comet
+surprise owl 150 300 1750 460
+surprise fox 0 1920 880

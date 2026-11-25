@@ -241,3 +241,7 @@ clock 0.07
 bob 1593.6 597.8 255 205 130
 bird 960 194 1382 432 5
 dawn ocean-dawn.jpg
+moon 1152 324 40
+surprise comet
+surprise whale 1380 690
+water 600 600 1920 845

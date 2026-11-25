@@ -65,6 +65,7 @@
     <nav class="settings-tabs" role="tablist" aria-label="Settings sections">
       <button type="button" role="tab" data-show="sites">Sites</button>
       <button type="button" role="tab" data-show="scene">Scene</button>
+      <button type="button" role="tab" data-show="play">Play</button>
       <button type="button" role="tab" data-show="sky">Sky</button>
       <button type="button" role="tab" data-show="weather">Weather</button>
       <button type="button" role="tab" data-show="more">More</button>
@@ -96,6 +97,9 @@
       </select>
       <select id="opt-tab-scene-key" hidden aria-hidden="true" tabindex="-1"></select>
       <div id="scene-grid" class="scene-grid" role="radiogroup" aria-label="Scene"></div>
+      <label><input type="checkbox" id="opt-scene-weather"> Match the real weather (rain, storms, snow, mist, clouds)</label>
+      <label><input type="checkbox" id="opt-real-moon"> Show tonight's real moon phase</label>
+      <button type="button" id="save-picture" class="save-picture">Save the scene as a 4K picture</button>
       <label for="opt-time">Time of day</label>
       <select id="opt-time">
         <option value="sunrise">Follow the real sunrise</option>
@@ -118,11 +122,26 @@
         <option value="random">A different view each time</option>
         <option value="weather">Match the weather outside</option>
       </select>
-      <label><input type="checkbox" id="opt-click-stars"> Click the sky for a shooting star</label>
-      <label><input type="checkbox" id="opt-click-lights"> Click windows and lamps to switch them</label>
-      <label><input type="checkbox" id="opt-click-water"> Click water for ripples</label>
-      <label><input type="checkbox" id="opt-parallax"> Move the mouse to gently shift the view</label>
       <p class="hint">Scenes have their own moon and weather. The Sky tab is for the classic starfield.</p>
+    </fieldset>
+    <fieldset data-tab="play">
+      <legend>Play</legend>
+      <p class="hint">Little things to do with the scenes.</p>
+      <label for="opt-hover">Hover effects</label>
+      <select id="opt-hover"><option value="ctrl">While holding Ctrl</option><option value="always">Always on</option><option value="off">Off</option></select>
+      <div class="play-grid"><label><input type="checkbox" id="opt-playFireflies"> Fireflies drift toward you</label><label><input type="checkbox" id="opt-playStars"> Stars sparkle as you pass</label><label><input type="checkbox" id="opt-playCat"> The cat notices you</label><label><input type="checkbox" id="opt-playWater"> Ripples follow you on water</label><label><input type="checkbox" id="opt-playGrassSnow"> Grass parts, snow swirls</label><label><input type="checkbox" id="opt-playBirds"> Birds scatter</label><label><input type="checkbox" id="opt-playLamps"> Lamps glow brighter</label></div>
+      <h3 class="play-head">Clicks</h3>
+      <div class="play-grid"><label><input type="checkbox" id="opt-click-stars"> Click the sky for a shooting star</label><label><input type="checkbox" id="opt-click-lights"> Click windows and lamps to switch them</label><label><input type="checkbox" id="opt-click-water"> Click water for ripples</label><label><input type="checkbox" id="opt-playMeteorHold"> Hold the sky: meteor shower</label><label><input type="checkbox" id="opt-playMoon"> Moon: phase and info</label><label><input type="checkbox" id="opt-playCatch"> Catch a shooting star</label><label><input type="checkbox" id="opt-playTrain"> Track: send the train</label><label><input type="checkbox" id="opt-playCatMug"> Cat and mug react</label><label><input type="checkbox" id="opt-playDraw"> Drag across stars: draw</label><label><input type="checkbox" id="opt-playWeather"> Double-click sky: rain or snow</label></div>
+      <h3 class="play-head">Special days</h3>
+      <div class="play-grid"><label><input type="checkbox" id="opt-festDiwali"> Diwali: diyas and lanterns</label><label><input type="checkbox" id="opt-festHoli"> Holi: clouds of colour</label><label><input type="checkbox" id="opt-festNewYear"> New Year's Eve: fireworks</label><label><input type="checkbox" id="opt-festBirthday"> My birthday: lanterns and a heart</label></div>
+      <label for="opt-birth-month">Birthday</label>
+      <div class="birth-row"><select id="opt-birth-month" aria-label="Birthday month"><option value="0">Not set</option><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select><select id="opt-birth-day" aria-label="Birthday day"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option><option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option></select></div>
+      <h3 class="play-head">Extras</h3>
+      <label for="opt-trail">Shooting star trails</label>
+      <select id="opt-trail"><option value="dust">Glittering dust</option><option value="ribbon">Glowing ribbon</option><option value="sparks">Sparkler sparks</option><option value="none">None</option></select>
+      <label for="opt-trail-len">Trails last</label>
+      <select id="opt-trail-len"><option value="brief">Brief (about 1 second)</option><option value="linger">Lingering (about 3 seconds)</option><option value="long">Long (up to 6 seconds)</option></select>
+      <div class="play-grid"><label><input type="checkbox" id="opt-playSurprises"> Rare surprises</label><label><input type="checkbox" id="opt-parallax"> Move the mouse to gently shift the view</label></div>
     </fieldset>
     <fieldset data-tab="sky">
       <legend>Sky</legend>
