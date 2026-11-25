@@ -164,3 +164,5 @@ front space-front.png
 clock 0.3
 satellite 9000
 nodawn
+moon 268.8 172.8 50
+surprise comet

@@ -20,9 +20,12 @@ namespace NightfallMoonClock
 {
     static class Program
     {
+        public static bool LaunchedAtSignIn;
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
+            // started by Windows at sign-in: either our --startup flag, or (for older startup entries) the PC has only just booted
+            LaunchedAtSignIn = Array.IndexOf(args, "--startup") >= 0 || (Environment.TickCount & int.MaxValue) < 4 * 60 * 1000;
             bool isNew;
             using (Mutex mutex = new Mutex(true, "NightfallMoonClock_SingleInstance", out isNew))
             {
@@ -32,6 +35,8 @@ namespace NightfallMoonClock
                 AppDomain.CurrentDomain.UnhandledException += delegate { DesktopIcons.Show(); };
                 Application.ThreadException += delegate { DesktopIcons.Show(); };
                 SystemEvents.SessionEnding += delegate { DesktopIcons.Show(); };
+                if (LaunchedAtSignIn && Settings.Load().GentleStart) GentleStart.Play();
+                if (ClockWindow.IsStartup()) ClockWindow.SetStartup(true);   // refresh the startup entry so it carries --startup
                 try { Application.Run(new ClockWindow()); }
                 finally { DesktopIcons.Show(); TaskbarCenter.SetEnabled(false); TaskbarLook.Stop(); LiveWallpaper.Shutdown(); }
             }
@@ -68,6 +73,13 @@ namespace NightfallMoonClock
         // scenes
         public string TrainEvery = "few", RoomView = "random", TimeOfDay = "sunrise";
         public bool WallClickStars = true, WallClickLights = true, WallClickWater = true, WallParallax = false;
+        public string PlayHover = "ctrl", TrailStyle = "dust", TrailLength = "linger";
+        public bool SceneWeather = true, RealMoon = true, GentleStart = true;
+        public bool FestDiwali = true, FestHoli = true, FestNewYear = true, FestBirthday = true, PlayMusicGlow = true;
+        public int BirthMonth = 0, BirthDay = 1;
+        public string WallMonitors = "different";
+        public bool PlayFireflies = true, PlayStars = true, PlayCat = true, PlayWater = true, PlayGrassSnow = true, PlayBirds = true, PlayLamps = true;
+        public bool PlayMeteorHold = true, PlayMoon = true, PlayTrain = true, PlayCatMug = true, PlayCatch = true, PlayDraw = true, PlayWeather = true, PlaySurprises = true;
         public float TrainGap() { return TrainEvery == "loop" ? 0 : TrainEvery == "ten" ? 600 : 180; }
         public bool CenterTaskbar = true;
         public string TaskbarStyle = "clear", TaskbarMaximized = "acrylic";
@@ -122,6 +134,28 @@ namespace NightfallMoonClock
                 s.WallpaperOn = B(d, "WallpaperOn", s.WallpaperOn); s.WallScene = S(d, "WallScene", s.WallScene); s.WallMode = S(d, "WallMode", s.WallMode);
                 s.WallPauseOnBattery = B(d, "WallPauseOnBattery", s.WallPauseOnBattery); s.WallPauseSaver = B(d, "WallPauseSaver", s.WallPauseSaver);
                 s.WallPauseBelow = I(d, "WallPauseBelow", s.WallPauseBelow);
+                s.FestDiwali = B(d, "FestDiwali", s.FestDiwali); s.FestHoli = B(d, "FestHoli", s.FestHoli); s.FestNewYear = B(d, "FestNewYear", s.FestNewYear); s.FestBirthday = B(d, "FestBirthday", s.FestBirthday); s.PlayMusicGlow = B(d, "PlayMusicGlow", s.PlayMusicGlow);
+                int bm, bd; string v2;
+                if (d.TryGetValue("BirthMonth", out v2) && int.TryParse(v2, out bm) && bm >= 0 && bm <= 12) s.BirthMonth = bm;
+                if (d.TryGetValue("BirthDay", out v2) && int.TryParse(v2, out bd) && bd >= 1 && bd <= 31) s.BirthDay = bd;
+                s.WallMonitors = S(d, "WallMonitors", s.WallMonitors);
+                s.SceneWeather = B(d, "SceneWeather", s.SceneWeather); s.RealMoon = B(d, "RealMoon", s.RealMoon); s.GentleStart = B(d, "GentleStart", s.GentleStart);
+                s.PlayHover = S(d, "PlayHover", s.PlayHover); s.TrailStyle = S(d, "TrailStyle", s.TrailStyle); s.TrailLength = S(d, "TrailLength", s.TrailLength);
+                s.PlayFireflies = B(d, "PlayFireflies", s.PlayFireflies);
+                s.PlayStars = B(d, "PlayStars", s.PlayStars);
+                s.PlayCat = B(d, "PlayCat", s.PlayCat);
+                s.PlayWater = B(d, "PlayWater", s.PlayWater);
+                s.PlayGrassSnow = B(d, "PlayGrassSnow", s.PlayGrassSnow);
+                s.PlayBirds = B(d, "PlayBirds", s.PlayBirds);
+                s.PlayLamps = B(d, "PlayLamps", s.PlayLamps);
+                s.PlayMeteorHold = B(d, "PlayMeteorHold", s.PlayMeteorHold);
+                s.PlayMoon = B(d, "PlayMoon", s.PlayMoon);
+                s.PlayTrain = B(d, "PlayTrain", s.PlayTrain);
+                s.PlayCatMug = B(d, "PlayCatMug", s.PlayCatMug);
+                s.PlayCatch = B(d, "PlayCatch", s.PlayCatch);
+                s.PlayDraw = B(d, "PlayDraw", s.PlayDraw);
+                s.PlayWeather = B(d, "PlayWeather", s.PlayWeather);
+                s.PlaySurprises = B(d, "PlaySurprises", s.PlaySurprises);
                 s.TrainEvery = S(d, "TrainEvery", s.TrainEvery); s.RoomView = S(d, "RoomView", s.RoomView); s.TimeOfDay = S(d, "TimeOfDay", s.TimeOfDay);
                 s.WallClickStars = B(d, "WallClickStars", s.WallClickStars); s.WallClickLights = B(d, "WallClickLights", s.WallClickLights);
                 s.WallClickWater = B(d, "WallClickWater", s.WallClickWater); s.WallParallax = B(d, "WallMouseShift", s.WallParallax); s.CenterTaskbar = B(d, "CenterTaskbar", s.CenterTaskbar);
@@ -153,6 +187,7 @@ namespace NightfallMoonClock
                     "AlignRight=" + Bool(AlignRight),
                     "WallpaperOn=" + Bool(WallpaperOn), "WallScene=" + WallScene, "WallMode=" + WallMode,
                     "WallPauseOnBattery=" + Bool(WallPauseOnBattery), "WallPauseSaver=" + Bool(WallPauseSaver), "WallPauseBelow=" + WallPauseBelow,
+                    "FestDiwali=" + Bool(FestDiwali), "FestHoli=" + Bool(FestHoli), "FestNewYear=" + Bool(FestNewYear), "FestBirthday=" + Bool(FestBirthday), "PlayMusicGlow=" + Bool(PlayMusicGlow), "BirthMonth=" + BirthMonth, "BirthDay=" + BirthDay, "WallMonitors=" + WallMonitors, "SceneWeather=" + Bool(SceneWeather), "RealMoon=" + Bool(RealMoon), "GentleStart=" + Bool(GentleStart), "PlayHover=" + PlayHover, "TrailStyle=" + TrailStyle, "TrailLength=" + TrailLength, "PlayFireflies=" + Bool(PlayFireflies), "PlayStars=" + Bool(PlayStars), "PlayCat=" + Bool(PlayCat), "PlayWater=" + Bool(PlayWater), "PlayGrassSnow=" + Bool(PlayGrassSnow), "PlayBirds=" + Bool(PlayBirds), "PlayLamps=" + Bool(PlayLamps), "PlayMeteorHold=" + Bool(PlayMeteorHold), "PlayMoon=" + Bool(PlayMoon), "PlayTrain=" + Bool(PlayTrain), "PlayCatMug=" + Bool(PlayCatMug), "PlayCatch=" + Bool(PlayCatch), "PlayDraw=" + Bool(PlayDraw), "PlayWeather=" + Bool(PlayWeather), "PlaySurprises=" + Bool(PlaySurprises),
                     "TrainEvery=" + TrainEvery, "RoomView=" + RoomView, "TimeOfDay=" + TimeOfDay,
                     "WallClickStars=" + Bool(WallClickStars), "WallClickLights=" + Bool(WallClickLights), "WallClickWater=" + Bool(WallClickWater), "WallMouseShift=" + Bool(WallParallax), "CenterTaskbar=" + Bool(CenterTaskbar), "TaskbarStyle=" + TaskbarStyle, "TaskbarMaximized=" + TaskbarMaximized, "RightEdge=" + RightEdge,
                     "Lat=" + (double.IsNaN(Lat) ? "" : Lat.ToString(inv)), "Lon=" + (double.IsNaN(Lon) ? "" : Lon.ToString(inv))
@@ -619,6 +654,7 @@ namespace NightfallMoonClock
             wallItem = new ToolStripMenuItem("Live wallpaper", null, delegate { settings.WallpaperOn = !settings.WallpaperOn; settings.Save(); LiveWallpaper.Apply(settings); SyncMenu(); });
             menu.Items.Add(new ToolStripMenuItem("Show the night sky now", null, delegate { SkyManager.Start(settings); }));
             menu.Items.Add(wallItem);
+            menu.Items.Add(new ToolStripMenuItem("Save the scene as a picture", null, delegate { SceneExport.SaveAsync(settings, LiveWallpaper.CurrentKey(settings)); }));
             menu.Items.Add(lockItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Settings...", null, delegate { OpenAwaySettings(); }));
@@ -728,7 +764,7 @@ namespace NightfallMoonClock
             {
                 using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKey, true))
                 {
-                    if (on) key.SetValue("NightfallMoonClock", "\"" + Application.ExecutablePath + "\"");
+                    if (on) key.SetValue("NightfallMoonClock", "\"" + Application.ExecutablePath + "\" --startup");
                     else key.DeleteValue("NightfallMoonClock", false);
                 }
             }

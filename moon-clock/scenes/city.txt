@@ -244,3 +244,5 @@ layer clouds-city.png 74 6
 plane 26000
 satellite 20000
 dawn city-dawn.jpg
+moon 1536 183.6 34
+surprise comet

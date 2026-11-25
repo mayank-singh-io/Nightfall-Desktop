@@ -102,6 +102,43 @@ namespace NightfallMoonClock
     }
 
     // ---------------------------------------------------------------- weather
+    // Is the internet connection metered (a phone hotspot, a capped plan)? Asked of Windows' own network list.
+    static class NetCost
+    {
+        [ComImport, Guid("DCB00008-570F-4A9B-8D69-199FDBA5723B"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface INetworkCostManager
+        {
+            void GetCost(out uint cost, IntPtr destIPAddr);
+            void GetDataPlanStatus(IntPtr status, IntPtr destIPAddr);
+            void SetDestinationAddresses(uint length, IntPtr addrList, [MarshalAs(UnmanagedType.VariantBool)] bool append);
+        }
+        [ComImport, Guid("DCB00C01-570F-4A9B-8D69-199FDBA5723B")] class NetworkListManager { }
+        static DateTime checkedAt = DateTime.MinValue; static bool metered;
+        public static bool Metered()
+        {
+            if ((DateTime.Now - checkedAt).TotalMinutes < 5) return metered;
+            checkedAt = DateTime.Now; metered = false;
+            try
+            {
+                object nlm = new NetworkListManager();
+                try
+                {
+                    uint cost; ((INetworkCostManager)nlm).GetCost(out cost, IntPtr.Zero);
+                    // fixed or variable cost, over the data limit, or roaming
+                    metered = (cost & (0x2 | 0x4 | 0x10000 | 0x40000)) != 0;
+                }
+                finally { Marshal.ReleaseComObject(nlm); }
+            }
+            catch { metered = false; }
+            return metered;
+        }
+        public static bool BatterySaver()
+        {
+            try { WallpaperNative.POWER p; return WallpaperNative.GetSystemPowerStatus(out p) && p.SystemStatusFlag == 1; }
+            catch { return false; }
+        }
+    }
+
     static class WeatherService
     {
         static int code = -1;
@@ -115,6 +152,15 @@ namespace NightfallMoonClock
             if ((c >= 71 && c <= 77) || c == 85 || c == 86) return "snow";
             if (c >= 95) return "storm";
             return "clear";
+        }
+
+        // weather for live scenes: like Kind, but also tells overcast skies apart ("cloudy")
+        public static string SceneKind(Settings s)
+        {
+            if (s.Weather != "auto") return s.Weather;
+            if (code < 0) return "clear";
+            if (code == 2 || code == 3) return "cloudy";
+            return KindFromCode(code);
         }
 
         public static string Kind(Settings s)
@@ -142,10 +188,17 @@ namespace NightfallMoonClock
             }
         }
 
+        // Checks at most once an hour, and only when it matters: while a scene is showing,
+        // never on a metered connection or in battery saver. (Opening Settings still checks right away.)
         public static void Refresh(Settings s, bool force)
         {
             if (double.IsNaN(s.Lat)) return;
-            if (!force && (DateTime.Now - fetched).TotalMinutes < 30) return;
+            if (!force)
+            {
+                if ((DateTime.Now - fetched).TotalMinutes < 60) return;
+                if (!SkyManager.Active && !LiveWallpaper.AnyShowing) return;
+                if (NetCost.Metered() || NetCost.BatterySaver()) return;
+            }
             fetched = DateTime.Now;
             double lat = s.Lat, lon = s.Lon;
             ThreadPool.QueueUserWorkItem(delegate
@@ -233,7 +286,7 @@ namespace NightfallMoonClock
     class SceneData
     {
         public Bitmap Background;
-        public string Dir, Rain = "none", Snow = "none", FrontFile;
+        public string Dir, Key, Rain = "none", Snow = "none", FrontFile;
         public bool NoShoot, LifeUnder;
         public List<string[]> Sprites = new List<string[]>();
         public List<float[]> SpriteSmoke = new List<float[]>(), SpriteGlow = new List<float[]>(), SpriteWheel = new List<float[]>();
@@ -243,6 +296,8 @@ namespace NightfallMoonClock
         public string DawnFile, DawnFront;
         public List<float[]> Falls = new List<float[]>();
         public List<string[]> Sways = new List<string[]>();
+        public List<float[]> Cats = new List<float[]>(), Moons = new List<float[]>();
+        public List<string[]> Surprises = new List<string[]>();
         public float ClockTop = -1;   // where the clock sits, as a share of the screen height (default if -1)
         public List<float[]> Stars = new List<float[]>(), Lights = new List<float[]>(), Shimmers = new List<float[]>(), Ripples = new List<float[]>();
         public List<float[]> Windows = new List<float[]>(), Smokes = new List<float[]>(), Waves = new List<float[]>(), Birds = new List<float[]>();
@@ -285,7 +340,7 @@ namespace NightfallMoonClock
                 string txt = Path.Combine(dir, key + ".txt");
                 if (!File.Exists(img) || !File.Exists(txt)) return null;
                 SceneData d = new SceneData();
-                d.Dir = dir;
+                d.Dir = dir; d.Key = key;
                 using (Image im = Image.FromFile(img)) d.Background = new Bitmap(im);
                 foreach (string raw in File.ReadAllLines(txt))
                 {
@@ -316,6 +371,9 @@ namespace NightfallMoonClock
                         case "dawnfront": d.DawnFront = p[1]; break;
                         case "fall": d.Falls.Add(Nums(p)); break;
                         case "sway": d.Sways.Add(p); break;
+                        case "cat": d.Cats.Add(Nums(p)); break;
+                        case "moon": d.Moons.Add(Nums(p)); break;
+                        case "surprise": d.Surprises.Add(p); break;
                         case "star": d.Stars.Add(Nums(p)); break;
                         case "light": d.Lights.Add(Nums(p)); break;
                         case "shimmer": d.Shimmers.Add(Nums(p)); break;
@@ -433,7 +491,11 @@ namespace NightfallMoonClock
         // frames that slowly crossfade into each other in place (used for the aurora)
         class Fade { public List<Bitmap> Frames = new List<Bitmap>(); public Bitmap Mix; public float Y, Period; public bool AfterFront; public double LastMix = -1e9; }
         readonly List<Fade> fades = new List<Fade>();
-        class Part { public float X, Y, VX, VY, Size, Age, Life, Seed; public int Kind; }   // 0 smoke, 1 sand, 2 puddle ripple
+        class Part { public float X, Y, VX, VY, Size, Age, Life, Seed; public int Kind, Col; }   // 0 smoke, 1 sand, 2 puddle ripple, 6-8 star trails
+        // shooting star trails: style "dust", "ribbon", "sparks" or "none"; length "brief" (1 s), "linger" (3 s), "long" (6 s)
+        public string TrailStyle = "dust", TrailLength = "linger";
+        static readonly int[][] TrailColours = { new[] { 236, 236, 255 }, new[] { 255, 214, 140 }, new[] { 210, 180, 255 }, new[] { 255, 170, 215 }, new[] { 170, 220, 255 } };
+        int trailCount;
 
         SceneData d;
         int w, h;
@@ -508,6 +570,202 @@ namespace NightfallMoonClock
         // interactions and options
         public bool ClickStars = true, ClickLights = true, ClickWater = true, Parallax = true;
         public float TrainGapSeconds = -1;   // -1 = scene default, 0 = always looping
+        // play: hover reactions, extra clicks, surprises
+        public bool HFireflies = true, HStars = true, HCat = true, HWater = true, HGrassSnow = true, HBirds = true, HLamps = true;
+        public bool CMeteorHold = true, CMoon = true, CTrain = true, CCatMug = true, CCatch = true, CDraw = true, CWeather = true, Surprises = true;
+        public Func<string[]> MoonInfo;
+        // special days and music
+        string festival; float horizonY;
+        class Burst { public int Type; public float X, Y, R; public double Start; public int[] Col; public float[] Ang; }
+        readonly List<Burst> bursts = new List<Burst>();
+        class Lantern { public float X, Y, VY, S, Ph; }
+        readonly List<Lantern> lanterns = new List<Lantern>();
+        float[][] diyas; float[][] holiPuffs; float[][] holiSpecks; double nextBurst, nextLantern;
+        static readonly int[][] FestColours = { new[] { 255, 200, 130 }, new[] { 205, 180, 255 }, new[] { 255, 170, 215 }, new[] { 170, 220, 255 }, new[] { 255, 222, 170 } };
+        static readonly int[][] HoliColours = { new[] { 255, 80, 160 }, new[] { 255, 200, 60 }, new[] { 80, 190, 255 }, new[] { 130, 230, 100 }, new[] { 190, 110, 255 } };
+        float musicGlow, musicTarget;
+        public void SetMusicPlaying(bool playing) { musicTarget = playing ? 1 : 0; }
+        public string Festival { get { return festival; } }
+        public void SetFestival(string f)
+        {
+            if (f == festival) return;
+            festival = f; bursts.Clear(); lanterns.Clear(); diyas = null; holiPuffs = null; holiSpecks = null; nextBurst = 0; nextLantern = 0;
+            RectangleF sb = new RectangleF(0, 0, w, h * 0.6f);
+            if (skyRegion != null) using (Bitmap one = new Bitmap(1, 1)) using (Graphics tg = Graphics.FromImage(one)) sb = skyRegion.GetBounds(tg);
+            horizonY = Math.Max(h * 0.3f, Math.Min(h * 0.8f, sb.Bottom * 0.88f));
+            if (f == "diwali" && d.Water.Count > 0)   // little lamps floating on the water
+            {
+                List<float[]> list = new List<float[]>();
+                for (int i = 0; i < 24; i++)
+                {
+                    float[] wr = d.Water[rng.Next(d.Water.Count)]; PointF a = M(wr[0], wr[1]), c = M(wr[2], wr[3]);
+                    float y = a.Y + (float)Math.Pow(rng.NextDouble(), 0.8) * (c.Y - a.Y) * 0.85f + 6 * ui;
+                    list.Add(new float[] { a.X + (float)rng.NextDouble() * (c.X - a.X), y, (float)rng.NextDouble() * 6, (float)(rng.NextDouble() - 0.5) * 5 * ui });
+                }
+                list.Sort(delegate (float[] p, float[] q) { return p[1].CompareTo(q[1]); });
+                diyas = list.ToArray();
+            }
+            if (f == "holi")
+            {
+                holiPuffs = new float[9 * 12][]; int k = 0;
+                for (int c = 0; c < 9; c++)
+                {
+                    float cx = (float)rng.NextDouble() * w, cy = h * (0.08f + (float)rng.NextDouble() * 0.34f), v = (6 + (float)rng.NextDouble() * 8) * ui; int col = rng.Next(HoliColours.Length);
+                    for (int j = 0; j < 12; j++) holiPuffs[k++] = new float[] { cx + (float)(rng.NextDouble() - 0.5) * 140 * ui, cy + (float)(rng.NextDouble() - 0.5) * 40 * ui, (26 + (float)rng.NextDouble() * 30) * ui, v, col };
+                }
+                holiSpecks = new float[140][];
+                for (int i = 0; i < holiSpecks.Length; i++) holiSpecks[i] = new float[] { (float)rng.NextDouble() * w, (float)rng.NextDouble() * h, (10 + (float)rng.NextDouble() * 18) * ui, (float)rng.NextDouble() * 6, rng.Next(HoliColours.Length), (1.2f + (float)rng.NextDouble() * 1.4f) * ui };
+            }
+        }
+
+        void StepFestival(double t, float fdt)
+        {
+            musicGlow += (musicTarget - musicGlow) * Math.Min(1, fdt * 0.8f);
+            if (festival == null) return;
+            if (festival == "newyear" && t > nextBurst && bursts.Count < 6)
+            {
+                nextBurst = t + 1400 + rng.NextDouble() * 2600;
+                Burst b = new Burst(); double pick = rng.NextDouble();
+                b.Type = pick < 0.4 ? 0 : pick < 0.75 ? 1 : 2;   // soft bloom, golden willow, far away
+                b.Start = t; b.X = w * (0.12f + (float)rng.NextDouble() * 0.76f);
+                b.Y = b.Type == 2 ? horizonY - (20 + (float)rng.NextDouble() * 50) * ui : h * (0.1f + (float)rng.NextDouble() * 0.25f);
+                b.R = (b.Type == 2 ? 12 + (float)rng.NextDouble() * 10 : b.Type == 1 ? 50 + (float)rng.NextDouble() * 20 : 30 + (float)rng.NextDouble() * 16) * ui;
+                b.Col = b.Type == 1 ? new[] { 255, 205, 120 } : FestColours[rng.Next(FestColours.Length)];
+                int n = b.Type == 1 ? 26 : b.Type == 2 ? 20 : 28; b.Ang = new float[n];
+                for (int i = 0; i < n; i++) b.Ang[i] = (float)(i * Math.PI * 2 / n + (rng.NextDouble() - 0.5) * 0.08);
+                bursts.Add(b);
+            }
+            for (int i = bursts.Count - 1; i >= 0; i--) if (t - bursts[i].Start > 4200) bursts.RemoveAt(i);
+            if ((festival == "diwali" || festival == "birthday") && t > nextLantern && lanterns.Count < 40)
+            {
+                nextLantern = t + (festival == "diwali" ? 700 : 1300) * (0.6 + rng.NextDouble() * 0.8);
+                Lantern l = new Lantern(); l.X = w * (0.04f + (float)rng.NextDouble() * 0.92f); l.Y = horizonY + (float)rng.NextDouble() * 30 * ui;
+                l.VY = -(10 + (float)rng.NextDouble() * 12) * ui; l.S = (9 + (float)rng.NextDouble() * 7) * ui; l.Ph = (float)rng.NextDouble() * 6; lanterns.Add(l);
+            }
+            for (int i = lanterns.Count - 1; i >= 0; i--) { Lantern l = lanterns[i]; l.Y += l.VY * fdt; l.X += (float)Math.Sin(t / 1800 + l.Ph) * 6 * ui * fdt; if (l.Y < -40 * ui) lanterns.RemoveAt(i); }
+            if (holiPuffs != null) foreach (float[] p in holiPuffs) { p[0] += p[3] * fdt; if (p[0] > w + p[2] * 2) p[0] = -p[2] * 2; }
+            if (holiSpecks != null) foreach (float[] p in holiSpecks) { p[1] += p[2] * fdt; p[0] += (float)Math.Sin(t / 900 + p[3]) * 10 * ui * fdt; if (p[1] > h) { p[1] = -5; p[0] = (float)rng.NextDouble() * w; } }
+        }
+
+        void DrawFestival(Graphics g, double t)
+        {
+            if (musicGlow > 0.01f)   // music playing: a warm glow rising from below, and the scene's lights brighten a little
+                GlowSprite.Draw(g, w * 0.5f, h * 1.05f, w * 0.75f, 255, 170, 110, 0.16f * musicGlow * (0.85f + 0.15f * (float)Math.Sin(t / 1300)));
+            if (festival == null) return;
+            if (diyas != null)
+                foreach (float[] dy in diyas)
+                {
+                    float x = dy[0] + (float)Math.Sin(t / 2600 + dy[2]) * dy[3], y = dy[1] + (float)Math.Sin(t / 900 + dy[2]) * 1.5f * ui;
+                    float s = (3.5f + (y - horizonY) / (h - horizonY + 1) * 6) * ui, fl = 0.75f + 0.25f * (float)Math.Sin(t / 120 + dy[2] * 5);
+                    for (int j = 0; j < 4; j++) GlowSprite.Draw(g, x + (float)Math.Sin(t / 400 + j) * ui, y + s * (1.2f + j * 0.9f), s * (0.9f - j * 0.12f), 255, 170, 80, (0.3f - j * 0.06f) * fl);   // reflection
+                    GlowSprite.Draw(g, x, y - s * 0.9f, s * 3, 255, 170, 80, 0.45f * fl);
+                    brush.Color = Color.FromArgb(255, 120, 56, 36); g.FillPie(brush, x - s * 1.4f, y - s * 0.9f, s * 2.8f, s * 1.6f, 0, 180);
+                    GlowSprite.Draw(g, x, y - s * 0.95f, s * 0.8f, 255, 236, 170, fl);
+                }
+            Region old = g.Clip; if (skyRegion != null) g.SetClip(skyRegion, CombineMode.Intersect);
+            if (holiPuffs != null) foreach (float[] p in holiPuffs) { int[] c = HoliColours[(int)p[4]]; GlowSprite.Draw(g, p[0], p[1], p[2] * 1.6f, c[0], c[1], c[2], 0.11f); }
+            foreach (Lantern l in lanterns)
+            {
+                float fade = Math.Min(1, (horizonY - l.Y + 30 * ui) / (40 * ui)), fl = 0.85f + 0.15f * (float)Math.Sin(t / 160 + l.Ph * 4);
+                GlowSprite.Draw(g, l.X, l.Y + l.S * 0.4f, l.S * 3.2f, 255, 150, 70, 0.45f * fade * fl);
+                brush.Color = Color.FromArgb(Alpha.Clamp(235 * fade), 255, 196, 120);
+                g.FillPolygon(brush, new PointF[] { new PointF(l.X - l.S * 0.7f, l.Y - l.S), new PointF(l.X + l.S * 0.7f, l.Y - l.S), new PointF(l.X + l.S * 0.5f, l.Y + l.S), new PointF(l.X - l.S * 0.5f, l.Y + l.S) });
+            }
+            if (festival == "birthday")   // a small heart of stars, on the side away from the moon
+            {
+                float hxc = d.Moons.Count > 0 && M(d.Moons[0][0], 0).X > w / 2 ? w * 0.28f : w * 0.72f, hyc = h * 0.17f, k = 4.2f * ui;
+                for (int i = 0; i < 24; i++)
+                {
+                    double a = i / 24.0 * Math.PI * 2; float x = (float)(16 * Math.Pow(Math.Sin(a), 3)), y = -(float)(13 * Math.Cos(a) - 5 * Math.Cos(2 * a) - 2 * Math.Cos(3 * a) - Math.Cos(4 * a));
+                    float tw = 0.75f + 0.25f * (float)Math.Sin(t / 700 + i);
+                    GlowSprite.Draw(g, hxc + x * k, hyc + y * k, 10 * ui, 255, 190, 215, 0.55f * tw);
+                    GlowSprite.Draw(g, hxc + x * k, hyc + y * k, 3.2f * ui, 255, 250, 252, tw);
+                }
+            }
+            foreach (Burst b in bursts)
+            {
+                float age = (float)((t - b.Start) / 1000.0);
+                float life = b.Type == 1 ? 3.6f : b.Type == 2 ? 1.8f : 2.6f; if (age > life) continue;
+                float fade = age < 0.15f ? age / 0.15f : 1 - (age - 0.15f) / (life - 0.15f);
+                if (age < 0.5f) GlowSprite.Draw(g, b.X, b.Y, b.R * 0.9f, b.Col[0], b.Col[1], b.Col[2], 0.5f * (1 - age / 0.5f));   // the first flash
+                foreach (float a in b.Ang)
+                    for (int tr = 0; tr < (b.Type == 1 ? 7 : 4); tr++)   // each spark with a short fading trail
+                    {
+                        float ta = Math.Max(0, age - tr * (b.Type == 1 ? 0.12f : 0.07f));
+                        float rr = b.R * (1 - (float)Math.Exp(-ta * (b.Type == 1 ? 2.2f : 2.6f)));
+                        float x = b.X + (float)Math.Cos(a) * rr, y = b.Y + (float)Math.Sin(a) * rr * (b.Type == 1 ? 0.8f : 1) + (b.Type == 1 ? 0.5f * b.R * 0.9f * ta * ta : 6 * ui * ta * ta);
+                        float al = fade * (1 - tr * (b.Type == 1 ? 0.18f : 0.3f));
+                        float rad = (b.Type == 2 ? 4f : 7f) * ui * (tr == 0 ? 1.3f : 0.85f);
+                        GlowSprite.Draw(g, x, y, rad, b.Col[0], b.Col[1], b.Col[2], Math.Min(1, al * 1.1f));
+                        if (tr == 0) { GlowSprite.Draw(g, x, y, rad * 2.2f, b.Col[0], b.Col[1], b.Col[2], al * 0.25f); GlowSprite.Draw(g, x, y, rad * 0.4f, 255, 252, 245, Math.Min(1, al * 1.2f)); }
+                    }
+            }
+            g.Clip = old;
+            if (holiSpecks != null) foreach (float[] p in holiSpecks) { int[] c = HoliColours[(int)p[4]]; brush.Color = Color.FromArgb(220, c[0], c[1], c[2]); g.FillEllipse(brush, p[0] - p[5], p[1] - p[5], p[5] * 2, p[5] * 2); }
+        }
+        // the real weather and the real moon
+        string realWeather = "clear"; float[] rwx, rwy, rwl, rwsp, rwph, rwr; int rwKind; double nextFlash, flashAt = -1e9;
+        float[] cloudX, cloudY, cloudS, cloudV; Bitmap cloudBmp; Color moonShadow = Color.Empty;
+        double moonPhase = -1;
+        public bool OwnWeather { get { return d.Rain != "none" || d.Snow != "none" || d.Key == "space" || d.LifeUnder; } }
+        public void SetMoonPhase(double p) { moonPhase = p; }
+        public void SetWeather(string kind)
+        {
+            if (kind == null || OwnWeather) kind = "clear";
+            if (kind == realWeather) return;
+            realWeather = kind;
+            rwKind = kind == "rain" || kind == "storm" ? 1 : kind == "snow" ? 2 : 0;
+            if (rwKind > 0)
+            {
+                int n = (int)(w * h / (rwKind == 2 ? 6000f : kind == "storm" ? 5000f : 8500f));
+                rwx = new float[n]; rwy = new float[n]; rwl = new float[n]; rwsp = new float[n]; rwph = new float[n]; rwr = new float[n];
+                for (int i = 0; i < n; i++)
+                {
+                    rwx[i] = (float)rng.NextDouble() * w; rwy[i] = (float)rng.NextDouble() * h; rwl[i] = (10 + (float)rng.NextDouble() * 10) * ui;
+                    rwsp[i] = rwKind == 1 ? (650 + (float)rng.NextDouble() * 350) * ui : (24 + (float)rng.NextDouble() * 36) * ui; rwph[i] = (float)rng.NextDouble() * 6; rwr[i] = (1 + (float)rng.NextDouble() * 1.6f) * ui;
+                }
+            }
+            else rwx = null;
+            if (kind == "cloudy" || kind == "rain" || kind == "storm" || kind == "fog")
+            {
+                if (cloudBmp == null) cloudBmp = MakeCloud();
+                int n = kind == "fog" ? 0 : 7;
+                cloudX = new float[n]; cloudY = new float[n]; cloudS = new float[n]; cloudV = new float[n];
+                for (int i = 0; i < n; i++) { cloudX[i] = (float)rng.NextDouble() * w; cloudY[i] = h * (0.02f + (float)rng.NextDouble() * 0.3f); cloudS[i] = (1.1f + (float)rng.NextDouble() * 1.1f) * ui; cloudV[i] = (5 + (float)rng.NextDouble() * 7) * ui; }
+            }
+            else cloudX = null;
+            nextFlash = 0;
+        }
+        // one soft cloud shape, made once and reused
+        static Bitmap MakeCloud()
+        {
+            // many faint, overlapping puffs along a gently curved band, so they merge into one smooth, soft cloud bank
+            Bitmap b = new Bitmap(640, 180, PixelFormat.Format32bppArgb);
+            Random r = new Random(7);
+            using (Graphics g = Graphics.FromImage(b))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                for (int i = 0; i < 140; i++)
+                {
+                    double u = r.NextDouble();
+                    float x = 70 + (float)u * 500, thick = (float)Math.Sin(u * Math.PI);          // thicker in the middle, thin at the ends
+                    float y = 95 - thick * 22 + (float)(r.NextDouble() - 0.5) * 34 * thick;
+                    float rr = (26 + (float)r.NextDouble() * 34) * (0.5f + 0.5f * thick);
+                    GlowSprite.Draw(g, x, y, rr * 1.9f, 92, 80, 112, 0.16f);
+                }
+            }
+            return b;
+        }                  // lines for the moon card (phase, light, tonight's sky)
+        public double SurpriseEveryMs = 0;               // 0 = rare (15 to 40 minutes)
+        float hx, hy; bool hoverOn;
+        bool pDown, showerFired; float pdx, pdy; double pDownAt, ignoreClicksUntil = -1e9;
+        double lastClickT = -1e9; float lastClickX, lastClickY;
+        double moonCardAt = -1e9; string[] moonCard; double wishAt = -1e9; float wishX, wishY; double catReactAt = -1e9;
+        double weatherUntil = -1e9, weatherFrom; int tempKind; float[] tx, ty, tl, tsp, tph, tr;
+        double nextSurprise, nextHoverRipple;
+        readonly List<PointF> drawing = new List<PointF>();
+        readonly List<KeyValuePair<double, PointF[]>> drawings = new List<KeyValuePair<double, PointF[]>>();
+        Font cardFont, cardFontBig;
         float parX, parY, parTX, parTY;
         bool[] lightOff, windowOff;
         class Sprite { public Bitmap Bmp; public float Y, Speed, Gap, X, CropY; public bool Active; public double Next; }
@@ -689,6 +947,7 @@ namespace NightfallMoonClock
                     if (raw != null) { Sway sy = new Sway(); sy.Bmp = Scale(raw, raw.Width * sc, raw.Height * sc); sy.Y = oy + (F(sw[2]) + crop.Y) * sc; sy.Amp = F(sw[3]); sways.Add(sy); }
             }
             SetDawn(0, true);
+            nextSurprise = SurpriseEveryMs > 0 ? SurpriseEveryMs : (3 + rng.NextDouble() * 6) * 60000;
         }
 
         static float F(string s) { return float.Parse(s, CultureInfo.InvariantCulture); }
@@ -739,13 +998,143 @@ namespace NightfallMoonClock
             }
         }
 
+        bool InSky(float x, float y) { return skyRegion != null && skyRegion.IsVisible(x, y); }
+
+        // hover: screen position and whether hover effects are active right now (Ctrl held, or always on)
+        public void SetHover(float x, float y, bool active)
+        {
+            hx = x - parX; hy = y - parY; hoverOn = active;
+            if (pDown && CDraw && InSky(hx, hy))   // drawing your own constellation by dragging across stars
+            {
+                foreach (float[] s in twinkles)
+                {
+                    if (Math.Abs(s[0] - hx) > 22 * ui || Math.Abs(s[1] - hy) > 22 * ui) continue;
+                    PointF p = new PointF(s[0], s[1]);
+                    if (drawing.Count == 0 || (drawing[drawing.Count - 1] != p && !drawing.Contains(p))) drawing.Add(p);
+                    break;
+                }
+            }
+        }
+        public void PointerDown(float x, float y, double t) { pDown = true; showerFired = false; pdx = x - parX; pdy = y - parY; pDownAt = t; drawing.Clear(); }
+        public void PointerUp(float x, float y, double t)
+        {
+            if (showerFired || drawing.Count >= 2) ignoreClicksUntil = t + 400;   // letting go after a hold or a drag isn't a click
+            pDown = false; showerFired = false;
+            if (drawing.Count >= 2) { drawings.Add(new KeyValuePair<double, PointF[]>(t, drawing.ToArray())); if (drawings.Count > 12) drawings.RemoveAt(0); }
+            drawing.Clear();
+        }
+
+        bool OverWater(float x, float y)
+        {
+            foreach (float[] wr in d.Water) { PointF a = M(wr[0], wr[1]), c = M(wr[2], wr[3]); if (x > a.X && x < c.X && y > a.Y && y < c.Y) return true; }
+            return false;
+        }
+
+        // rare surprises: kind 10 comet, 11 owl, 12 fox, 13 whale
+        public void SpawnSurprise(double t)
+        {
+            if (d.Surprises.Count == 0) return;
+            string[] sp = d.Surprises[rng.Next(d.Surprises.Count)];
+            bool ltr = rng.NextDouble() < 0.5;
+            if (sp[1] == "comet" && dawnAmt < 0.5f && !d.NoShoot)
+                movers.Add(new float[] { 10, ltr ? -60 : w + 60, h * (0.06f + (float)rng.NextDouble() * 0.16f), (ltr ? 1 : -1) * w / 45f, h * 0.002f * (float)(rng.NextDouble() - 0.3), (float)t, 60000, 0 });
+            else if (sp[1] == "owl" && sp.Length >= 6)
+            {
+                PointF a = M(F(sp[2]), F(sp[3])), c = M(F(sp[4]), F(sp[5]));
+                movers.Add(new float[] { 11, ltr ? a.X - 60 : c.X + 60, a.Y + (float)rng.NextDouble() * (c.Y - a.Y), (ltr ? 1 : -1) * (c.X - a.X) / 7f, (float)(rng.NextDouble() - 0.5) * 10 * ui, (float)t, 12000, (float)rng.NextDouble() * 6 });
+            }
+            else if (sp[1] == "fox" && sp.Length >= 5)
+            {
+                PointF a = M(F(sp[2]), F(sp[4])), c = M(F(sp[3]), F(sp[4]));
+                movers.Add(new float[] { 12, ltr ? a.X - 80 : c.X + 80, a.Y, (ltr ? 1 : -1) * (c.X - a.X) / 18f, 0, (float)t, 25000, 0 });
+            }
+            else if (sp[1] == "whale" && sp.Length >= 4)
+            {
+                PointF a = M(F(sp[2]), F(sp[3]));
+                movers.Add(new float[] { 13, a.X, a.Y, 0, 0, (float)t, 7000, ltr ? 1 : -1 });
+            }
+        }
+
+        void StartWeatherBurst(double t)
+        {
+            bool snowy = d.Snow != "none" || d.Key == "snowcabin" || d.Key == "village" || d.Key == "room-snow";
+            tempKind = snowy ? 2 : 1;
+            int n = (int)(w * h / (snowy ? 5000f : 7000f));
+            tx = new float[n]; ty = new float[n]; tl = new float[n]; tsp = new float[n]; tph = new float[n]; tr = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                tx[i] = (float)rng.NextDouble() * w; ty[i] = (float)rng.NextDouble() * h; tl[i] = (10 + (float)rng.NextDouble() * 10) * ui;
+                tsp[i] = tempKind == 1 ? (650 + (float)rng.NextDouble() * 350) * ui : (26 + (float)rng.NextDouble() * 40) * ui; tph[i] = (float)rng.NextDouble() * 6; tr[i] = (1 + (float)rng.NextDouble() * 1.8f) * ui;
+            }
+            weatherFrom = t; weatherUntil = t + 60000;
+        }
+
+        void ShowerAt(float x, float y, double t)
+        {
+            for (int i = 0; i < 16; i++)
+            {
+                double a = rng.NextDouble() * Math.PI * 2; float sp = (220 + (float)rng.NextDouble() * 200) * ui;
+                streaks.Add(new float[] { x + (float)Math.Cos(a) * 20 * ui, y + (float)Math.Sin(a) * 20 * ui, (float)Math.Cos(a) * sp, (float)Math.Sin(a) * sp, (float)(t + rng.NextDouble() * 2500), 700 + (float)rng.NextDouble() * 400, 0.3f, 1.4f });
+            }
+        }
+
         // mouse position as -1..1 across the screen; the scene shifts a little the other way
         public void SetPointer(float nx, float ny) { if (Parallax) { parTX = -nx * 12 * ui; parTY = -ny * 7 * ui; } else { parTX = parTY = 0; } }
 
         // a click at screen coordinates; returns true when it did something
         public bool Click(float x, float y, double t)
         {
+            if ((pDown && (showerFired || drawing.Count >= 2)) || t < ignoreClicksUntil) { ignoreClicksUntil = -1e9; return true; }
             x -= parX; y -= parY;
+            // double-click the sky: a minute of rain (or snow in snowy scenes)
+            bool dbl = t - lastClickT < 450 && Math.Abs(x - lastClickX) < 24 * ui && Math.Abs(y - lastClickY) < 24 * ui;
+            lastClickT = dbl ? -1e9 : t; lastClickX = x; lastClickY = y;
+            if (dbl && CWeather && InSky(x, y)) { StartWeatherBurst(t); return true; }
+            // catch a shooting star
+            if (CCatch)
+                for (int i = streaks.Count - 1; i >= 0; i--)
+                {
+                    float[] s = streaks[i]; if (t < s[4] || t > s[4] + s[5]) continue;
+                    float k = (float)((t - s[4]) / s[5]); float hxs = s[0] + s[2] * k, hys = s[1] + s[3] * k;
+                    if (Math.Abs(hxs - x) < 40 * ui && Math.Abs(hys - y) < 40 * ui)
+                    {
+                        streaks.RemoveAt(i);
+                        for (int j = 0; j < 18; j++) { Part q = new Part(); q.Kind = 4; q.X = hxs; q.Y = hys; double a = rng.NextDouble() * 6.283; float sp = (30 + (float)rng.NextDouble() * 90) * ui; q.VX = (float)Math.Cos(a) * sp; q.VY = (float)Math.Sin(a) * sp; q.Size = (1.5f + (float)rng.NextDouble() * 2) * ui; q.Life = 1.2f + (float)rng.NextDouble() * 0.8f; parts.Add(q); }
+                        wishAt = t; wishX = hxs; wishY = hys; return true;
+                    }
+                }
+            // the moon: phase and tonight's sky
+            if (CMoon)
+                foreach (float[] mn in d.Moons)
+                {
+                    PointF c = M(mn[0], mn[1]); float r = mn[2] * sc;
+                    if ((x - c.X) * (x - c.X) + (y - c.Y) * (y - c.Y) < r * r * 2.6f) { moonCardAt = t; moonCard = MoonInfo != null ? MoonInfo() : new string[] { "The moon" }; return true; }
+                }
+            // the cat, and steaming mugs
+            if (CCatMug)
+            {
+                foreach (float[] ct in d.Cats)
+                {
+                    PointF c = M(ct[0], ct[1]); float cs = ct[2] * sc;
+                    if (Math.Abs(x - c.X) < cs * 0.5f && y > c.Y - cs * 1.45f && y < c.Y + cs * 0.1f)
+                    {
+                        catReactAt = t;
+                        for (int j = 0; j < 4; j++) { Part q = new Part(); q.Kind = 5; q.X = c.X + (float)(rng.NextDouble() - 0.5) * cs * 0.4f; q.Y = c.Y - cs * 1.3f; q.VX = (float)(rng.NextDouble() - 0.5) * 14 * ui; q.VY = -(22 + (float)rng.NextDouble() * 16) * ui; q.Size = (5 + (float)rng.NextDouble() * 3) * ui; q.Life = 2.2f; q.Age = -j * 0.25f; parts.Add(q); }
+                        return true;
+                    }
+                }
+                foreach (float[] sm in d.Smokes)
+                {
+                    PointF c = M(sm[0], sm[1]);
+                    if (Math.Abs(x - c.X) < 45 * sc && y > c.Y - 30 * sc && y < c.Y + 80 * sc)
+                    {
+                        for (int j = 0; j < 9; j++) { Part q = new Part(); q.Kind = 0; q.X = c.X + (float)(rng.NextDouble() - 0.5) * 10 * ui; q.Y = c.Y; q.VX = (float)(rng.NextDouble() - 0.5) * 24 * ui; q.VY = -(30 + (float)rng.NextDouble() * 25) * ui; q.Size = sm[2] * sc * (0.9f + (float)rng.NextDouble() * 0.6f); q.Life = 3 + (float)rng.NextDouble() * 1.5f; q.Seed = (float)rng.NextDouble() * 6; q.Age = -j * 0.08f; parts.Add(q); }
+                        return true;
+                    }
+                }
+            }
+            // send the train
+            if (CTrain && train != null && !train.Active && y > train.Y - 20 * ui && y < train.Y + train.Bmp.Height + 30 * ui) { train.Next = t; return true; }
             if (ClickLights)
             {
                 for (int i = 0; i < d.Toggles.Count; i++)
@@ -870,7 +1259,8 @@ namespace NightfallMoonClock
             {
                 Part q = parts[i];
                 q.Age += fdt;
-                if (q.Age > q.Life) { parts.RemoveAt(i); continue; }
+                if (q.Age > q.Life) { if (q.Kind >= 6 && q.Kind <= 8) trailCount--; parts.RemoveAt(i); continue; }
+                if (q.Kind == 8) q.VY += 70 * ui * fdt;
                 q.X += q.VX * fdt + (q.Kind == 0 ? (float)Math.Sin(q.Age * 1.3 + q.Seed) * 5 * ui * fdt : 0);
                 q.Y += q.VY * fdt;
             }
@@ -889,7 +1279,7 @@ namespace NightfallMoonClock
             for (int i = 0; i < fx.Length; i++)
             {
                 fvx[i] += (float)(rng.NextDouble() - 0.5) * 40 * ui * fdt; fvy[i] += (float)(rng.NextDouble() - 0.5) * 40 * ui * fdt;
-                float lim = 18 * ui;
+                float lim = (hoverOn && HFireflies ? 60 : 18) * ui;   // they speed up while drifting toward you
                 fvx[i] = Math.Max(-lim, Math.Min(lim, fvx[i])); fvy[i] = Math.Max(-lim, Math.Min(lim, fvy[i]));
                 fx[i] += fvx[i] * fdt; fy[i] += fvy[i] * fdt;
                 RectangleF r = ffBox[i];
@@ -933,11 +1323,78 @@ namespace NightfallMoonClock
             for (int i = movers.Count - 1; i >= 0; i--)
             {
                 float[] mv = movers[i]; mv[1] += mv[3] * fdt; mv[2] += mv[4] * fdt;
-                if (mv[1] < -200 || mv[1] > w + 200 || t - mv[5] > mv[6]) movers.RemoveAt(i);
+                if (mv[1] < -300 || mv[1] > w + 300 || t - mv[5] > mv[6]) movers.RemoveAt(i);
             }
             parX += (parTX - parX) * Math.Min(1, fdt * 3); parY += (parTY - parY) * Math.Min(1, fdt * 3);
+            StepFestival(t, fdt);
+            // hold the sky for a meteor shower (when not drawing a constellation)
+            if (pDown && CMeteorHold && !showerFired && t - pDownAt > 700 && drawing.Count < 2 && Math.Abs(hx - pdx) < 14 * ui && Math.Abs(hy - pdy) < 14 * ui && InSky(pdx, pdy))
+            { showerFired = true; ShowerAt(pdx, pdy, t); }
+            if (hoverOn)
+            {
+                if (HFireflies)
+                    for (int i = 0; i < fx.Length; i++)
+                    {
+                        float ddx = hx - fx[i], ddy = hy - fy[i], dd = (float)Math.Sqrt(ddx * ddx + ddy * ddy);
+                        if (dd < 560 * ui && dd > 8) { float pull = (1 - dd / (560 * ui)) * 150 + 30; fvx[i] += ddx / dd * pull * ui * fdt; fvy[i] += ddy / dd * pull * ui * fdt; float lim = 60 * ui; fvx[i] = Math.Max(-lim, Math.Min(lim, fvx[i])); fvy[i] = Math.Max(-lim, Math.Min(lim, fvy[i])); }
+                    }
+                if (HBirds)
+                    for (int i = 0; i < bx.Length; i++)
+                        if (Math.Abs(bx[i] - hx) < 190 * ui && Math.Abs(by[i] - hy) < 150 * ui) { bv[i] = (bx[i] >= hx ? 1 : -1) * Math.Max(Math.Abs(bv[i]), 110 * ui); by[i] -= 50 * ui * fdt; }
+                if (HGrassSnow && (dropKind == 2 || (tempKind == 2 && t < weatherUntil)))
+                {
+                    float[] sx = dropKind == 2 ? dx : tx, sy = dropKind == 2 ? dy : ty;
+                    for (int i = 0; i < sx.Length; i++)
+                    {
+                        float ddx = sx[i] - hx, ddy = sy[i] - hy, dd = (float)Math.Sqrt(ddx * ddx + ddy * ddy);
+                        if (dd < 150 * ui && dd > 1) { float f = (1 - dd / (150 * ui)) * 140 * ui * fdt; sx[i] += (-ddy / dd + ddx / dd * 0.5f) * f; sy[i] += (ddx / dd + ddy / dd * 0.5f) * f; }
+                    }
+                }
+                if (HWater && t > nextHoverRipple && OverWater(hx, hy))
+                { nextHoverRipple = t + 170; Part q = new Part(); q.Kind = 3; q.X = hx; q.Y = hy; q.Size = 26 * ui; q.Life = 1.4f; parts.Add(q); }
+            }
+            for (int i = 0; i < bv.Length; i++) { float norm = 30 * ui; if (Math.Abs(bv[i]) > norm) bv[i] *= (float)Math.Pow(0.6, fdt); }
+            if (rwx != null)
+                for (int i = 0; i < rwx.Length; i++)
+                {
+                    rwy[i] += rwsp[i] * fdt;
+                    if (rwKind == 1) rwx[i] -= rwsp[i] * fdt * 0.12f; else rwx[i] += (float)Math.Sin(t / 1200 + rwph[i]) * 14 * ui * fdt;
+                    if (rwy[i] > h) { rwy[i] = -rwl[i]; rwx[i] = (float)rng.NextDouble() * w * 1.1f; }
+                    if (hoverOn && HGrassSnow && rwKind == 2) { float ddx = rwx[i] - hx, ddy = rwy[i] - hy, dd = (float)Math.Sqrt(ddx * ddx + ddy * ddy); if (dd < 150 * ui && dd > 1) { float f = (1 - dd / (150 * ui)) * 140 * ui * fdt; rwx[i] += (-ddy / dd + ddx / dd * 0.5f) * f; rwy[i] += (ddx / dd + ddy / dd * 0.5f) * f; } }
+                }
+            if (cloudX != null) for (int i = 0; i < cloudX.Length; i++) { cloudX[i] += cloudV[i] * fdt; if (cloudX[i] > w + 300 * ui) cloudX[i] = -cloudBmp.Width * cloudS[i]; }
+            if (realWeather == "storm" && t > nextFlash) { if (nextFlash > 0) flashAt = t; nextFlash = t + 8000 + rng.NextDouble() * 14000; }
+            if (t < weatherUntil && tx != null)
+                for (int i = 0; i < tx.Length; i++)
+                {
+                    ty[i] += tsp[i] * fdt;
+                    if (tempKind == 1) tx[i] -= tsp[i] * fdt * 0.12f; else tx[i] += (float)Math.Sin(t / 1200 + tph[i]) * 14 * ui * fdt;
+                    if (ty[i] > h) { ty[i] = -tl[i]; tx[i] = (float)rng.NextDouble() * w * 1.1f; }
+                }
+            if (Surprises && d.Surprises.Count > 0 && t > nextSurprise) { SpawnSurprise(t); nextSurprise = t + (SurpriseEveryMs > 0 ? SurpriseEveryMs : (15 + rng.NextDouble() * 25) * 60000); }
             // shooting stars
             if (AllowShootingStars && !d.NoShoot && dawnAmt < 0.4f && t > nextShot) { AddStreak(t, false); nextShot = t + (d.ShotEvery > 0 ? d.ShotEvery * (0.6 + rng.NextDouble() * 0.8) : 7000 + rng.Next(9000)); }
+            if (TrailStyle != "none")
+            {
+                float life = TrailLength == "brief" ? 1f : TrailLength == "long" ? 6f : 3f;
+                float rate = TrailStyle == "ribbon" ? 150 : TrailStyle == "sparks" ? 60 : 60;
+                foreach (float[] st in streaks)
+                {
+                    if (t < st[4] || t > st[4] + st[5] || trailCount > 1200) continue;
+                    float k = (float)((t - st[4]) / st[5]), hx2 = st[0] + st[2] * k, hy2 = st[1] + st[3] * k;
+                    float want = rate * fdt; int n = (int)want + (rng.NextDouble() < want - (int)want ? 1 : 0);
+                    for (int j = 0; j < n; j++)
+                    {
+                        Part q = new Part(); q.Col = rng.Next(TrailColours.Length); q.Seed = (float)rng.NextDouble() * 6;
+                        float back = (float)rng.NextDouble() * 0.03f;   // spread the new grains a little behind the head
+                        q.X = hx2 - st[2] * back + (float)(rng.NextDouble() - 0.5) * 6 * ui; q.Y = hy2 - st[3] * back + (float)(rng.NextDouble() - 0.5) * 6 * ui;
+                        if (TrailStyle == "dust") { q.Kind = 6; q.VX = st[2] * 0.015f; q.VY = (5 + (float)rng.NextDouble() * 10) * ui * (life / 3f); q.Size = (1.2f + (float)rng.NextDouble() * 1.4f) * ui; q.Life = life * (0.6f + (float)rng.NextDouble() * 0.4f); }
+                        else if (TrailStyle == "ribbon") { q.Kind = 7; q.Size = (6 + (float)rng.NextDouble() * 3) * ui; q.Life = life * 0.7f; }
+                        else { q.Kind = 8; double a = rng.NextDouble() * 6.283; float sp = (30 + (float)rng.NextDouble() * 60) * ui; q.VX = (float)Math.Cos(a) * sp; q.VY = (float)Math.Sin(a) * sp - 15 * ui; q.Size = (1.1f + (float)rng.NextDouble() * 0.9f) * ui; q.Life = Math.Min(life, 0.7f + (float)rng.NextDouble() * life * 0.5f); }
+                        parts.Add(q); trailCount++;
+                    }
+                }
+            }
             for (int i = streaks.Count - 1; i >= 0; i--) if (t > streaks[i][4] + streaks[i][5]) streaks.RemoveAt(i);
         }
 
@@ -948,6 +1405,7 @@ namespace NightfallMoonClock
             System.Drawing.Drawing2D.Matrix saved = g.Transform;
             g.TranslateTransform(parX, parY);
             g.DrawImageUnscaled(CurrentBg, 0, 0);
+            if (d.Key != "space") DrawMoonPhase(g);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             Region old = g.Clip;
             g.SetClip(skyRegion, CombineMode.Intersect);
@@ -956,7 +1414,13 @@ namespace NightfallMoonClock
             {
                 double boost = since >= 0 && since < 7000 ? Math.Sin(Math.PI * since / 7000) * (0.5 + 0.5 * Math.Sin(t / 160 + s[3] * 3)) : 0;
                 if (dawnAmt > 0.9f) break;
-                int a = (int)(255 * (1 - dawnAmt) * Math.Min(1, 0.55 + 0.45 * Math.Sin(t / 1000 * s[4] + s[3]) + boost * 0.6));
+                if (hoverOn && HStars)
+                {
+                    float sd = (float)Math.Sqrt((s[0] - hx) * (s[0] - hx) + (s[1] - hy) * (s[1] - hy));
+                    if (sd < 140 * ui) GlowSprite.Draw(g, s[0], s[1], s[2] * 7 + 4 * ui, 240, 232, 255, (1 - sd / (140 * ui)) * 0.9f);
+                }
+                float wdim = realWeather == "clear" ? 1 : realWeather == "cloudy" ? 0.6f : realWeather == "snow" ? 0.6f : 0.4f;
+                int a = (int)(255 * wdim * (1 - dawnAmt) * Math.Min(1, 0.55 + 0.45 * Math.Sin(t / 1000 * s[4] + s[3]) + boost * 0.6));
                 brush.Color = Color.FromArgb(Math.Max(0, Math.Min(255, a)), 236, 228, 244);
                 g.FillEllipse(brush, s[0] - s[2], s[1] - s[2], s[2] * 2, s[2] * 2);
             }
@@ -972,10 +1436,15 @@ namespace NightfallMoonClock
             DrawFalls(g, t);
             DrawSways(g, t);
             if (front != null) g.DrawImageUnscaled(CurrentFront, frontAt.X, frontAt.Y);
+            if (d.Key == "space") DrawMoonPhase(g);   // the photo moon is part of the space scene's front layer
             foreach (Drift dr in drifts) if (dr.AfterFront) DrawDrift(g, dr, t);
             if (dawnAmt < 0.7f) foreach (Fade fd in fades) if (fd.AfterFront) DrawFade(g, fd, t);
             if (d.LifeUnder) DrawLife(g, t, 1);
             else { DrawLife(g, t, 2); DrawDrops(g); }
+            DrawCats(g, t);
+            DrawFestival(g, t);
+            DrawRealWeather(g, t);
+            DrawPlay(g, t);
             g.Transform = saved;
         }
 
@@ -1004,6 +1473,221 @@ namespace NightfallMoonClock
                         g.FillPath(pb, gp);
                     }
                 }
+            }
+        }
+
+        // tonight's real moon phase, drawn over the painted moon
+        void DrawMoonPhase(Graphics g)
+        {
+            if (moonPhase < 0 || dawnAmt > 0.95f || d.Moons.Count == 0) return;
+            float[] mn = d.Moons[0]; PointF c = M(mn[0], mn[1]); float r = mn[2] * sc * 1.04f;
+            if (moonShadow.IsEmpty)   // the sky colour in a ring just outside the moon, so the dark side melts into it
+            {
+                int rr = 0, gg = 0, bb = 0, n = 0;
+                for (int i = 0; i < 16; i++)
+                {
+                    double ang = i * Math.PI / 8; float dist = r * (d.Key == "space" ? 1.6f : 2.4f);
+                    int px = (int)(c.X + Math.Cos(ang) * dist), py = (int)(c.Y + Math.Sin(ang) * dist);
+                    if (px < 0 || py < 0 || px >= bg.Width || py >= bg.Height) continue;
+                    Color k2 = bg.GetPixel(px, py); rr += k2.R; gg += k2.G; bb += k2.B; n++;
+                }
+                if (n == 0) n = 1;
+                moonShadow = Color.FromArgb(255, Math.Min(255, rr / n + 3), Math.Min(255, gg / n + 2), Math.Min(255, bb / n + 5));   // the faintest earthshine
+            }
+            int alpha = Alpha.Clamp(255 * (1 - dawnAmt));
+            bool waxing = moonPhase < 0.5; double k = Math.Cos(2 * Math.PI * moonPhase);   // 1 new, 0 quarter, -1 full
+            float ex = (float)Math.Abs(k) * r;
+            // the dark part: the unlit half, plus (crescent) or minus (gibbous) the terminator ellipse
+            using (GraphicsPath half = new GraphicsPath()) using (GraphicsPath term = new GraphicsPath())
+            {
+                half.AddPie(c.X - r - 0.5f, c.Y - r - 0.5f, r * 2 + 1, r * 2 + 1, waxing ? 90 : -90, 180);
+                term.AddEllipse(c.X - ex, c.Y - r - 0.5f, Math.Max(0.01f, ex * 2), r * 2 + 1);
+                using (Region dark = new Region(half))
+                {
+                    if (k > 0) dark.Union(term); else dark.Exclude(term);
+                    if (d.Key != "space")   // painted moons may be crescents, so start from a full, plain moon
+                        using (SolidBrush light = new SolidBrush(Color.FromArgb(alpha, 236, 230, 244))) g.FillEllipse(light, c.X - r, c.Y - r, r * 2, r * 2);
+                    using (SolidBrush shade = new SolidBrush(Color.FromArgb(alpha, moonShadow))) g.FillRegion(shade, dark);
+                }
+            }
+        }
+
+        void DrawRealWeather(Graphics g, double t)
+        {
+            if (realWeather == "clear") return;
+            Region old = g.Clip; if (skyRegion != null) g.SetClip(skyRegion, CombineMode.Intersect);
+            if (cloudX != null)
+                using (ImageAttributes ia = new ImageAttributes())
+                {
+                    ColorMatrix cm = new ColorMatrix(); cm.Matrix33 = realWeather == "cloudy" ? 0.8f : 0.95f; ia.SetColorMatrix(cm);
+                    for (int i = 0; i < cloudX.Length; i++)
+                        g.DrawImage(cloudBmp, new Rectangle((int)cloudX[i], (int)cloudY[i], (int)(cloudBmp.Width * cloudS[i]), (int)(cloudBmp.Height * cloudS[i])), 0, 0, cloudBmp.Width, cloudBmp.Height, GraphicsUnit.Pixel, ia);
+                }
+            if (realWeather == "storm" && t - flashAt < 900)   // silent lightning: the sky lights up softly, twice
+            {
+                double e = t - flashAt; float a = (float)(e < 120 ? 1 - e / 120 : e > 260 && e < 420 ? 0.6 * (1 - (e - 260) / 160) : 0);
+                if (a > 0) { brush.Color = Color.FromArgb(Alpha.Clamp(70 * a), 220, 214, 255); g.FillRectangle(brush, 0, 0, w, h); }
+            }
+            g.Clip = old;
+            if (realWeather == "fog")   // soft mist drifting low across the scene
+                for (int i = 0; i < 6; i++)
+                {
+                    float x = (float)((t / 60.0 * (6 + i * 2) + i * 400) % (w + 800)) - 400, y = h * (0.55f + i * 0.06f);
+                    GlowSprite.Draw(g, x, y, w * 0.35f, 210, 200, 225, 0.12f);
+                    GlowSprite.Draw(g, x + w * 0.5f, y + 20 * ui, w * 0.3f, 210, 200, 225, 0.1f);
+                }
+            if (rwx != null)
+            {
+                if (rwKind == 1) { pen.Color = Color.FromArgb(realWeather == "storm" ? 95 : 70, 205, 198, 228); pen.Width = 1; for (int i = 0; i < rwx.Length; i++) g.DrawLine(pen, rwx[i], rwy[i], rwx[i] + rwl[i] * 0.12f, rwy[i] - rwl[i]); }
+                else { brush.Color = Color.FromArgb(200, 242, 238, 250); for (int i = 0; i < rwx.Length; i++) g.FillEllipse(brush, rwx[i] - rwr[i], rwy[i] - rwr[i], rwr[i] * 2, rwr[i] * 2); }
+            }
+        }
+
+        void DrawCats(Graphics g, double t)
+        {
+            foreach (float[] ct in d.Cats)
+            {
+                PointF c = M(ct[0], ct[1]); float cs = ct[2] * sc; bool hanging = ct.Length > 3 && ct[3] > 0;
+                bool near = HCat && hoverOn && Math.Abs(hx - c.X) < cs * 1.6f && Math.Abs(hy - (c.Y - cs * 0.5f)) < cs * 1.4f;
+                bool happy = t - catReactAt < 2500;
+                double speed = happy ? 160 : near ? 260 : 1500, amp = happy ? 0.55 : near ? 0.4 : 0.16;
+                float sw = (float)(Math.Sin(t / speed) * amp);
+                pen.Color = Color.FromArgb(255, 10, 6, 12); pen.Width = Math.Max(2f, cs * (hanging ? 0.08f : 0.09f));
+                pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round;
+                PointF[] tail;
+                if (hanging)   // tail hanging over the porch rail, swinging
+                    tail = new PointF[] { new PointF(c.X + cs * 0.3f, c.Y), new PointF(c.X + cs * (0.5f + sw * 0.4f), c.Y + cs * 0.3f), new PointF(c.X + cs * (0.45f + sw), c.Y + cs * 0.6f) };
+                else           // tail lying on the deck, tip flicking up
+                    tail = new PointF[] { new PointF(c.X + cs * 0.35f, c.Y - cs * 0.05f), new PointF(c.X + cs * 0.75f, c.Y - cs * (0.02f + sw * 0.15f)), new PointF(c.X + cs * 0.9f, c.Y - cs * (0.2f + sw * 0.5f)) };
+                g.DrawCurve(pen, tail);
+                pen.StartCap = LineCap.Flat; pen.EndCap = LineCap.Flat;
+                if ((near || happy) && (t % 1400) < 220)   // an ear twitches
+                {
+                    brush.Color = Color.FromArgb(255, 10, 6, 12);
+                    float side = ((int)(t / 1400) % 2 == 0) ? -1 : 1;
+                    float ex = c.X + side * cs * 0.2f, ey = c.Y - cs * 1.2f;
+                    g.FillPolygon(brush, new PointF[] { new PointF(ex - cs * 0.07f, ey), new PointF(ex + side * cs * 0.05f, ey - cs * 0.3f), new PointF(ex + cs * 0.07f, ey) });
+                }
+            }
+        }
+
+        void DrawPlay(Graphics g, double t)
+        {
+            // weather burst: a minute of rain or snow, easing in and out
+            if (t < weatherUntil && tx != null)
+            {
+                float k = (float)Math.Min(1, Math.Min((t - weatherFrom) / 3000, (weatherUntil - t) / 4000));
+                if (tempKind == 1) { pen.Color = Color.FromArgb(Alpha.Clamp(80 * k), 205, 198, 228); pen.Width = 1; for (int i = 0; i < tx.Length; i++) g.DrawLine(pen, tx[i], ty[i], tx[i] + tl[i] * 0.12f, ty[i] - tl[i]); }
+                else { brush.Color = Color.FromArgb(Alpha.Clamp(210 * k), 242, 238, 250); for (int i = 0; i < tx.Length; i++) g.FillEllipse(brush, tx[i] - tr[i], ty[i] - tr[i], tr[i] * 2, tr[i] * 2); }
+            }
+            // constellations you drew (fade after two minutes), and the one being drawn
+            for (int i = drawings.Count - 1; i >= 0; i--)
+            {
+                float age = (float)((t - drawings[i].Key) / 120000.0);
+                if (age >= 1) { drawings.RemoveAt(i); continue; }
+                DrawConstellation(g, drawings[i].Value, 1 - age * age);
+            }
+            if (drawing.Count > 0) DrawConstellation(g, drawing.ToArray(), 1);
+            // the moon card
+            if (t - moonCardAt < 7000 && moonCard != null && d.Moons.Count > 0)
+            {
+                float a = (float)Math.Min(1, Math.Min((t - moonCardAt) / 300, (7000 - (t - moonCardAt)) / 800));
+                PointF c = M(d.Moons[0][0], d.Moons[0][1]); float r = d.Moons[0][2] * sc;
+                if (cardFont == null) { cardFont = new Font("Segoe UI", 11f * ui, FontStyle.Regular, GraphicsUnit.Pixel); cardFontBig = new Font("Segoe UI Semibold", 14f * ui, FontStyle.Regular, GraphicsUnit.Pixel); }
+                float lineH = 20 * ui, pad = 12 * ui, cw = 0;
+                for (int i = 0; i < moonCard.Length; i++) cw = Math.Max(cw, g.MeasureString(moonCard[i], i == 0 ? cardFontBig : cardFont).Width);
+                float bw = cw + pad * 2, bh = lineH * moonCard.Length + pad * 2 - 4 * ui;
+                float bx0 = c.X + r * 1.6f, by0 = c.Y - bh / 2;
+                if (bx0 + bw > w - 10) bx0 = c.X - r * 1.6f - bw;
+                by0 = Math.Max(8, Math.Min(h - bh - 8, by0));
+                using (GraphicsPath gp = RoundRect(bx0, by0, bw, bh, 12 * ui))
+                {
+                    brush.Color = Color.FromArgb(Alpha.Clamp(185 * a), 22, 14, 30); g.FillPath(brush, gp);
+                    pen.Color = Color.FromArgb(Alpha.Clamp(90 * a), 200, 180, 230); pen.Width = 1; g.DrawPath(pen, gp);
+                }
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                for (int i = 0; i < moonCard.Length; i++)
+                {
+                    brush.Color = Color.FromArgb(Alpha.Clamp((i == 0 ? 245 : 200) * a), 236, 228, 244);
+                    g.DrawString(moonCard[i], i == 0 ? cardFontBig : cardFont, brush, bx0 + pad, by0 + pad - 2 * ui + i * lineH);
+                }
+            }
+            // a caught shooting star: a little wish
+            if (t - wishAt < 4000)
+            {
+                float a = (float)Math.Min(1, Math.Min((t - wishAt) / 300, (4000 - (t - wishAt)) / 1200));
+                if (cardFontBig == null) { cardFont = new Font("Segoe UI", 11f * ui, FontStyle.Regular, GraphicsUnit.Pixel); cardFontBig = new Font("Segoe UI Semibold", 14f * ui, FontStyle.Regular, GraphicsUnit.Pixel); }
+                string msg = "\u2726 make a wish";
+                SizeF ms = g.MeasureString(msg, cardFontBig);
+                float yy = wishY - 30 * ui - (float)((t - wishAt) / 4000) * 26 * ui;
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                brush.Color = Color.FromArgb(Alpha.Clamp(240 * a), 255, 240, 210);
+                g.DrawString(msg, cardFontBig, brush, Math.Max(8, Math.Min(w - ms.Width - 8, wishX - ms.Width / 2)), yy);
+            }
+        }
+
+        void DrawConstellation(Graphics g, PointF[] pts, float a)
+        {
+            pen.Color = Color.FromArgb(Alpha.Clamp(140 * a), 210, 196, 240); pen.Width = Math.Max(1f, 1.2f * ui);
+            for (int i = 1; i < pts.Length; i++) g.DrawLine(pen, pts[i - 1], pts[i]);
+            foreach (PointF p in pts) GlowSprite.Draw(g, p.X, p.Y, 7 * ui, 236, 228, 255, 0.8f * a);
+        }
+
+        static GraphicsPath RoundRect(float x, float y, float w2, float h2, float r)
+        {
+            GraphicsPath gp = new GraphicsPath(); float dd = r * 2;
+            gp.AddArc(x, y, dd, dd, 180, 90); gp.AddArc(x + w2 - dd, y, dd, dd, 270, 90);
+            gp.AddArc(x + w2 - dd, y + h2 - dd, dd, dd, 0, 90); gp.AddArc(x, y + h2 - dd, dd, dd, 90, 90); gp.CloseFigure();
+            return gp;
+        }
+
+        void DrawSurprise(Graphics g, float[] mv, double t)
+        {
+            float x = mv[1], y = mv[2], life = (float)((t - mv[5]) / mv[6]);
+            float fadeIn = Math.Min(1, life * 8), fadeOut = Math.Min(1, (1 - life) * 8), a = Math.Max(0, Math.Min(fadeIn, fadeOut));
+            Color sil = Color.FromArgb(Alpha.Clamp(255 * a), 16, 10, 20);
+            if (mv[0] == 10)   // comet: bright head and a long soft tail pointing away from its travel
+            {
+                float dirx = mv[3] > 0 ? -1 : 1;
+                for (int i = 14; i >= 0; i--) GlowSprite.Draw(g, x + dirx * i * 16 * ui, y - mv[4] * i * 0.4f, (10 + i * 2.2f) * ui, 200, 220, 255, a * 0.5f * (1 - i / 15f));
+                GlowSprite.Draw(g, x, y, 12 * ui, 255, 255, 255, a);
+            }
+            else if (mv[0] == 11)   // owl: a dark silhouette gliding with slow wingbeats
+            {
+                float s = 22 * ui, flap = (float)Math.Sin(t / 170 + mv[7]) * s * 0.55f, dir = mv[3] > 0 ? 1 : -1;
+                brush.Color = sil; pen.Color = sil; pen.Width = Math.Max(2f, s * 0.22f);
+                g.FillEllipse(brush, x - s * 0.35f, y - s * 0.25f, s * 0.7f, s * 0.5f);
+                g.FillEllipse(brush, x + dir * s * 0.25f - s * 0.18f, y - s * 0.4f, s * 0.36f, s * 0.36f);
+                g.DrawLines(pen, new PointF[] { new PointF(x - s * 1.2f, y - flap), new PointF(x - s * 0.5f, y - s * 0.12f), new PointF(x, y) });
+                g.DrawLines(pen, new PointF[] { new PointF(x, y), new PointF(x + s * 0.5f, y - s * 0.12f), new PointF(x + s * 1.2f, y - flap) });
+            }
+            else if (mv[0] == 12)   // fox: trotting along the ground, bushy tail, pointed ears
+            {
+                float s = 30 * ui * (0.6f + 0.6f * (y / h)), dir = mv[3] > 0 ? 1 : -1, step = (float)Math.Sin(t / 120) * s * 0.18f;
+                brush.Color = sil; pen.Color = sil; pen.Width = Math.Max(1.5f, s * 0.08f);
+                g.FillEllipse(brush, x - s * 0.6f, y - s * 0.55f, s * 1.2f, s * 0.42f);                       // body
+                float hx2 = x + dir * s * 0.62f;
+                g.FillEllipse(brush, hx2 - s * 0.2f, y - s * 0.75f, s * 0.4f, s * 0.32f);                     // head
+                g.FillPolygon(brush, new PointF[] { new PointF(hx2 + dir * s * 0.15f, y - s * 0.65f), new PointF(hx2 + dir * s * 0.42f, y - s * 0.55f), new PointF(hx2 + dir * s * 0.12f, y - s * 0.5f) });   // snout
+                g.FillPolygon(brush, new PointF[] { new PointF(hx2 - s * 0.12f, y - s * 0.7f), new PointF(hx2 - s * 0.06f, y - s * 0.98f), new PointF(hx2 + s * 0.02f, y - s * 0.72f) });                     // ear
+                g.FillEllipse(brush, x - dir * s * 1.25f - s * 0.35f, y - s * 0.62f, s * 0.8f, s * 0.3f);    // tail
+                g.DrawLine(pen, x - s * 0.35f, y - s * 0.2f, x - s * 0.35f + step, y); g.DrawLine(pen, x + s * 0.35f, y - s * 0.2f, x + s * 0.35f - step, y);   // legs
+                g.DrawLine(pen, x - s * 0.2f, y - s * 0.2f, x - s * 0.2f - step, y); g.DrawLine(pen, x + s * 0.2f, y - s * 0.2f, x + s * 0.2f + step, y);
+            }
+            else if (mv[0] == 13)   // whale: a dark back arching out of the sea, a spout, then a splash
+            {
+                float s = 70 * sc, k = life, dir = mv[7];
+                float rise = (float)Math.Sin(Math.Min(1, k / 0.75f) * Math.PI);
+                if (rise > 0.02f)
+                {
+                    brush.Color = Color.FromArgb(255, 14, 10, 22);
+                    float top = y - rise * s * 0.45f;
+                    g.FillPie(brush, x - s, top, s * 2, rise * s * 0.9f + 2, 180, 180);
+                    g.FillPolygon(brush, new PointF[] { new PointF(x + dir * s * 0.2f, top + s * 0.06f), new PointF(x + dir * s * 0.32f, top - s * 0.14f * rise), new PointF(x + dir * s * 0.42f, top + s * 0.1f) });
+                }
+                if (k > 0.15f && k < 0.55f)   // spout
+                    for (int i = 0; i < 6; i++) GlowSprite.Draw(g, x - dir * s * 0.3f + (float)Math.Sin(i * 2.1) * 6 * ui, y - s * 0.5f - i * 12 * sc * (float)((k - 0.15) / 0.4), (6 + i) * ui, 220, 226, 245, 0.45f * (1 - i / 6f));
+                if (k > 0.7f) GlowSprite.Draw(g, x, y, s * 0.9f * (k - 0.7f) / 0.3f + 4, 220, 226, 245, 0.5f * (1 - (k - 0.7f) / 0.3f));   // splash
             }
         }
 
@@ -1046,7 +1730,18 @@ namespace NightfallMoonClock
                     float up = 1 - (float)i / rows;   // the tops of the blades move more than the bottoms
                     float dx = (float)(Math.Sin(t / 1500.0 + i * 0.09) * 0.6 + Math.Sin(t / 2300.0 + i * 0.05 + 1.3) * 0.4) * sy.Amp * sc * (0.25f + 0.75f * up);
                     int hgt = Math.Min(rh, bh - i * rh);
-                    g.DrawImage(sy.Bmp, new RectangleF(ox + dx, sy.Y + i * rh, sy.Bmp.Width, hgt), new RectangleF(0, i * rh, sy.Bmp.Width, hgt), GraphicsUnit.Pixel);
+                    float rowY = sy.Y + i * rh, R = 120 * ui;
+                    if (hoverOn && HGrassSnow && Math.Abs(rowY - hy) < R * 1.4f)
+                    {
+                        // part the grass: the strip left of the mouse leans left, the strip right of it leans right
+                        float push = (1 - Math.Abs(rowY - hy) / (R * 1.4f)) * 26 * ui;
+                        float cx = hx - ox;
+                        float leftW = Math.Max(0, cx), rightX = Math.Min(sy.Bmp.Width, cx);
+                        if (leftW > 0) g.DrawImage(sy.Bmp, new RectangleF(ox + dx - push, rowY, leftW, hgt), new RectangleF(0, i * rh, leftW, hgt), GraphicsUnit.Pixel);
+                        if (rightX < sy.Bmp.Width) g.DrawImage(sy.Bmp, new RectangleF(ox + dx + rightX + push, rowY, sy.Bmp.Width - rightX, hgt), new RectangleF(rightX, i * rh, sy.Bmp.Width - rightX, hgt), GraphicsUnit.Pixel);
+                        continue;
+                    }
+                    g.DrawImage(sy.Bmp, new RectangleF(ox + dx, rowY, sy.Bmp.Width, hgt), new RectangleF(0, i * rh, sy.Bmp.Width, hgt), GraphicsUnit.Pixel);
                 }
             }
         }
@@ -1056,6 +1751,7 @@ namespace NightfallMoonClock
             foreach (float[] mv in movers)
             {
                 float x = mv[1], y = mv[2];
+                if (mv[0] >= 10) { DrawSurprise(g, mv, t); continue; }
                 if (mv[0] == 3)   // aircraft far away: a steady white light with a red blink
                 {
                     GlowSprite.Draw(g, x, y, 7 * ui, 255, 250, 240, 0.7f);
@@ -1089,19 +1785,21 @@ namespace NightfallMoonClock
 
         void DrawFade(Graphics g, Fade fd, double t)
         {
-            if (t - fd.LastMix > 160)   // re-blend a few times a second; the aurora changes slowly
+            if (t - fd.LastMix > 100)   // re-blend ten times a second
             {
                 fd.LastMix = t;
                 int n = fd.Frames.Count;
                 double pos = (t / 1000.0 / Math.Max(1f, fd.Period)) % n;
                 int i = (int)pos, j = (i + 1) % n;
                 float a = (float)(pos - i); a = a * a * (3 - 2 * a);   // ease in and out
+                // the whole aurora slowly brightens and dims, with a faint flutter, like real aurora pulsing
+                float glow = (float)(0.72 + 0.22 * (0.5 + 0.5 * Math.Sin(t / 2600.0)) + 0.06 * Math.Sin(t / 700.0)) + musicGlow * 0.12f;
                 using (Graphics mg = Graphics.FromImage(fd.Mix))
                 {
                     mg.Clear(Color.Transparent);
                     mg.CompositingMode = CompositingMode.SourceOver;
-                    DrawWithAlpha(mg, fd.Frames[i], 1 - a);
-                    DrawWithAlpha(mg, fd.Frames[j], a);
+                    DrawWithAlpha(mg, fd.Frames[i], (1 - a) * glow);
+                    DrawWithAlpha(mg, fd.Frames[j], a * glow);
                 }
             }
             g.DrawImageUnscaled(fd.Mix, (int)ox, (int)fd.Y);
@@ -1128,8 +1826,29 @@ namespace NightfallMoonClock
             if (x + bw < w) g.DrawImageUnscaled(dr.Bmp, x + bw, (int)dr.Y);
         }
 
+        void DrawTrails(Graphics g)
+        {
+            if (trailCount <= 0) return;
+            Region old = g.Clip; if (skyRegion != null) g.SetClip(skyRegion, CombineMode.Intersect);
+            foreach (Part q in parts)
+            {
+                if (q.Kind < 6 || q.Kind > 8 || q.Age < 0) continue;
+                int[] c = TrailColours[q.Col]; float left = 1 - q.Age / q.Life;
+                if (q.Kind == 6)   // glitter: a soft coloured glow with a bright twinkling core
+                {
+                    float tw = 0.45f + 0.55f * (float)Math.Abs(Math.Sin(q.Age * 7 + q.Seed * 6)), a = (float)Math.Pow(left, 1.1);
+                    GlowSprite.Draw(g, q.X, q.Y, q.Size * 6f, c[0], c[1], c[2], a * 0.7f);
+                    GlowSprite.Draw(g, q.X, q.Y, q.Size * 1.8f, 255, 255, 255, a * tw);
+                }
+                else if (q.Kind == 7) GlowSprite.Draw(g, q.X, q.Y, q.Size * 2.6f, c[0], c[1], c[2], (float)Math.Pow(left, 1.4) * 0.3f);
+                else { GlowSprite.Draw(g, q.X, q.Y, q.Size * 5f, c[0], c[1], c[2], left * 0.8f); GlowSprite.Draw(g, q.X, q.Y, q.Size * 1.6f, 255, 250, 235, left); }
+            }
+            g.Clip = old;
+        }
+
         void DrawStreaks(Graphics g, double t)
         {
+            DrawTrails(g);
             foreach (float[] s in streaks)
             {
                 if (t < s[4]) continue;
@@ -1156,7 +1875,8 @@ namespace NightfallMoonClock
                 double f = 0.5 + 0.5 * Math.Sin(t / (700 + ph * 90) + ph);
                 PointF p = M(L[0], L[1]);
                 float rr = Math.Max(1f, L[2] * sc) * (1.2f + 0.4f * (float)f);
-                GlowSprite.Draw(g, p.X, p.Y, rr * 4.5f, (int)L[3], (int)L[4], (int)L[5], 0.25f + 0.3f * (float)f);
+                float near = hoverOn && HLamps ? Math.Max(0, 1 - (float)Math.Sqrt((p.X - hx) * (p.X - hx) + (p.Y - hy) * (p.Y - hy)) / (260 * ui)) : 0;
+                GlowSprite.Draw(g, p.X, p.Y, rr * (4.5f + near * 4 + musicGlow), (int)L[3], (int)L[4], (int)L[5], 0.25f + 0.3f * (float)f + near * 0.4f + musicGlow * 0.15f);
                 GlowSprite.Draw(g, p.X, p.Y, rr * 1.2f, 255, 240, 220, 0.6f + 0.4f * (float)f);
             }
             pen.Width = Math.Max(1f, sc);
@@ -1201,6 +1921,7 @@ namespace NightfallMoonClock
                 if (windowOff[wi]) { PointF po = M(Wn[0], Wn[1]); brush.Color = Color.FromArgb(255, 44, 30, 36); g.FillRectangle(brush, po.X, po.Y, Wn[2] * sc, Wn[3] * sc); continue; }
                 double f = 0.6 + 0.25 * Math.Sin(t / 230 + ph) + 0.15 * Math.Sin(t / 97 + ph * 3);
                 PointF p = M(Wn[0], Wn[1]);
+                if (hoverOn && HLamps && Math.Abs(p.X - hx) < 240 * ui && Math.Abs(p.Y - hy) < 240 * ui) f += 0.45;
                 float ww = Wn[2] * sc, hh = Wn[3] * sc;
                 using (GraphicsPath gp = new GraphicsPath())
                 {
@@ -1234,6 +1955,7 @@ namespace NightfallMoonClock
             }
             foreach (Part q in parts)
             {
+                if (q.Kind >= 6 && q.Kind <= 8) continue;   // star trails are drawn with the shooting stars
                 float life = q.Age / q.Life;
                 if (q.Kind == 0 && d.LifeUnder) continue;   // drawn in the inside pass
                 if (q.Kind == 0)   // smoke
@@ -1246,6 +1968,21 @@ namespace NightfallMoonClock
                 {
                     brush.Color = Color.FromArgb(Alpha.Clamp(120 * (1 - life)), 214, 170, 170);
                     g.FillEllipse(brush, q.X - q.Size, q.Y - q.Size, q.Size * 2, q.Size * 2);
+                }
+                else if (q.Kind == 4)   // sparkles from a caught shooting star
+                {
+                    if (q.Age < 0) continue;
+                    GlowSprite.Draw(g, q.X, q.Y, q.Size * 4, 255, 244, 214, (1 - life) * 0.8f);
+                    continue;
+                }
+                else if (q.Kind == 5)   // little hearts from a happy cat
+                {
+                    if (q.Age < 0) continue;
+                    float hs = q.Size, al = (1 - life);
+                    brush.Color = Color.FromArgb(Alpha.Clamp(220 * al), 255, 150, 190);
+                    g.FillEllipse(brush, q.X - hs, q.Y - hs * 0.5f, hs, hs); g.FillEllipse(brush, q.X, q.Y - hs * 0.5f, hs, hs);
+                    g.FillPolygon(brush, new PointF[] { new PointF(q.X - hs * 0.95f, q.Y + hs * 0.05f), new PointF(q.X + hs * 0.95f, q.Y + hs * 0.05f), new PointF(q.X, q.Y + hs * 1.1f) });
+                    continue;
                 }
                 else if (q.Kind == 3)   // ripple from a click on water
                 {
@@ -1267,7 +2004,7 @@ namespace NightfallMoonClock
                 float a = (float)Math.Max(0, Math.Sin(t / 700 + fph[i] * 3));
                 if (a < 0.05f) continue;
                 float r = 2.2f * ui;
-                GlowSprite.Draw(g, fx[i], fy[i], r * 7, 200, 255, 120, 0.4f * a);
+                GlowSprite.Draw(g, fx[i], fy[i], r * (7 + musicGlow * 2), 200, 255, 120, (0.4f + musicGlow * 0.15f) * a);
                 GlowSprite.Draw(g, fx[i], fy[i], r * 1.6f, 240, 255, 190, a);
             }
             pen.Color = Color.FromArgb(255, 20, 12, 24); pen.Width = 2 * ui;
@@ -1391,6 +2128,8 @@ namespace NightfallMoonClock
             if (train != null) train.Bmp.Dispose();
             foreach (Bitmap b in new Bitmap[] { bgDawn, bgMix, frontDawn, frontMix }) if (b != null) b.Dispose();
             foreach (Sway sy in sways) sy.Bmp.Dispose();
+            if (cardFont != null) cardFont.Dispose(); if (cardFontBig != null) cardFontBig.Dispose();
+            if (cloudBmp != null) cloudBmp.Dispose();
             foreach (Drift dr in drifts) dr.Bmp.Dispose();
             foreach (Fade fd in fades) { foreach (Bitmap b in fd.Frames) b.Dispose(); fd.Mix.Dispose(); }
             if (skyClip != null) skyClip.Dispose();
@@ -1490,6 +2229,143 @@ namespace NightfallMoonClock
     {
         public ConstellationShape Shape;
         public string Where, When;
+    }
+
+    static class GentleStart
+    {
+        public static void Play()
+        {
+            try
+            {
+                List<Form> forms = new List<Form>();
+                foreach (Screen sc in Screen.AllScreens) { GentleForm f = new GentleForm(sc.Bounds); f.Show(); forms.Add(f); }
+                // runs on its own small message loop and closes itself; then everything is freed
+                System.Windows.Forms.Timer done = new System.Windows.Forms.Timer(); done.Interval = 200;
+                done.Tick += delegate { if (forms.TrueForAll(delegate (Form f) { return f.IsDisposed; })) { done.Stop(); done.Dispose(); Application.ExitThread(); } };
+                done.Start();
+                Application.Run();
+            }
+            catch { }
+        }
+    }
+
+    class GentleForm : Form
+    {
+        readonly Stopwatch clock = Stopwatch.StartNew();
+        readonly System.Windows.Forms.Timer tick = new System.Windows.Forms.Timer();
+        readonly float[] sx, sy, sr, sAt;
+        const double StarsEnd = 2600, FadeStart = 3000, FadeEnd = 4800;
+        public GentleForm(Rectangle bounds)
+        {
+            FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual;
+            Bounds = bounds; BackColor = Color.FromArgb(8, 6, 14); DoubleBuffered = true;
+            Random r = new Random();
+            int n = Math.Max(120, bounds.Width * bounds.Height / 9000);
+            sx = new float[n]; sy = new float[n]; sr = new float[n]; sAt = new float[n];
+            for (int i = 0; i < n; i++) { sx[i] = (float)r.NextDouble() * bounds.Width; sy[i] = (float)r.NextDouble() * bounds.Height; sr[i] = 0.6f + (float)Math.Pow(r.NextDouble(), 3) * 1.8f; sAt[i] = (float)(r.NextDouble() * StarsEnd); }
+            tick.Interval = 33; tick.Tick += delegate { Step(); }; tick.Start();
+        }
+        protected override CreateParams CreateParams
+        {
+            get { CreateParams cp = base.CreateParams; cp.ExStyle |= 0x80000 | 0x20 | 0x80 | 0x08000000; return cp; }   // layered, click-through, no taskbar button, never takes focus
+        }
+        protected override bool ShowWithoutActivation { get { return true; } }
+        void Step()
+        {
+            double t = clock.Elapsed.TotalMilliseconds;
+            if (t > FadeStart) Opacity = Math.Max(0, 1 - (t - FadeStart) / (FadeEnd - FadeStart));
+            Invalidate();
+            if (t > FadeEnd) { tick.Stop(); tick.Dispose(); Close(); Dispose(); }
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            double t = clock.Elapsed.TotalMilliseconds;
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (SolidBrush b = new SolidBrush(Color.White))
+                for (int i = 0; i < sx.Length; i++)
+                {
+                    double age = t - sAt[i]; if (age < 0) continue;
+                    float a = (float)Math.Min(1, age / 500);
+                    b.Color = Color.FromArgb((int)(235 * a), 236, 228, 250);
+                    e.Graphics.FillEllipse(b, sx[i] - sr[i], sy[i] - sr[i], sr[i] * 2, sr[i] * 2);
+                }
+        }
+    }
+
+    // Special days. Diwali and Holi follow the lunar calendar; dates from Drik Panchang (checked through 2033).
+    static class Festivals
+    {
+        static readonly int[,] Diwali = { { 2026, 11, 8 }, { 2027, 10, 29 }, { 2028, 10, 17 }, { 2029, 11, 5 }, { 2030, 10, 26 }, { 2031, 11, 14 }, { 2032, 11, 2 }, { 2033, 10, 22 } };
+        static readonly int[,] Holi = { { 2026, 3, 4 }, { 2027, 3, 22 }, { 2028, 3, 11 }, { 2029, 3, 1 }, { 2030, 3, 20 }, { 2031, 3, 9 }, { 2032, 3, 27 }, { 2033, 3, 16 }, { 2034, 3, 5 }, { 2035, 3, 24 } };
+        static bool Near(int[,] table, DateTime day, int before, int after)
+        {
+            for (int i = 0; i < table.GetLength(0); i++)
+            {
+                double diff = (day.Date - new DateTime(table[i, 0], table[i, 1], table[i, 2])).TotalDays;
+                if (diff >= -before && diff <= after) return true;
+            }
+            return false;
+        }
+        // which special day it is (or null); the birthday wins if two fall together
+        public static string Today(Settings s, DateTime now)
+        {
+            if (s.FestBirthday && s.BirthMonth > 0 && now.Month == s.BirthMonth && now.Day == s.BirthDay) return "birthday";
+            if (s.FestDiwali && Near(Diwali, now, 1, 1)) return "diwali";   // the evening before, the day, and the day after
+            if (s.FestHoli && Near(Holi, now, 1, 0)) return "holi";         // Holika Dahan and the day of colours
+            if (s.FestNewYear && now.Month == 12 && now.Day == 31) return "newyear";
+            return null;
+        }
+    }
+
+    static class SceneExport
+    {
+        // renders the wallpaper's scene at 3840x2160 as it looks right now (dawn, weather, moon, special day), in the background
+        public static void SaveAsync(Settings s, string key)
+        {
+            System.Threading.Thread th = new System.Threading.Thread(delegate ()
+            {
+                try
+                {
+                    SceneData data = SceneData.Load(SceneData.Resolve(key, s), s); if (data == null) return;
+                    using (SceneRenderer r = new SceneRenderer())
+                    {
+                        r.Parallax = false; r.Build(data, 3840, 2160, 2f);
+                        r.SetDawn(SunClock.DawnAmount(s, DateTime.Now), true);
+                        r.SetWeather(s.SceneWeather ? WeatherService.SceneKind(s) : "clear");
+                        r.SetMoonPhase(s.RealMoon ? Moon.Phase(DateTime.UtcNow) : -1);
+                        r.SetFestival(Festivals.Today(s, DateTime.Now));
+                        string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Nightfall");
+                        Directory.CreateDirectory(dir);
+                        string file = Path.Combine(dir, "Nightfall " + key + " " + DateTime.Now.ToString("yyyy-MM-dd HHmm") + ".png");
+                        using (Bitmap bmp = new Bitmap(3840, 2160)) using (Graphics g = Graphics.FromImage(bmp))
+                        {
+                            for (int f = 0; f < 90; f++) { r.Step(f * 40, 0.04); r.Paint(g, f * 40); }   // let rain, fireflies and smoke settle in
+                            bmp.Save(file, ImageFormat.Png);
+                        }
+                        System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + file + "\"");
+                    }
+                }
+                catch { }
+            });
+            th.IsBackground = true; th.Start();
+        }
+    }
+
+    static class MoonCard
+    {
+        public static string[] Lines(Settings s)
+        {
+            double p = Moon.Phase(DateTime.UtcNow);
+            string name = Moon.Name(p);
+            List<string> lines = new List<string>();
+            lines.Add(name);
+            lines.Add(Moon.PercentLit(p) + "% lit");
+            double toFull = ((0.5 - p) % 1 + 1) % 1 * 29.53, toNew = ((1 - p) % 1 + 1) % 1 * 29.53;
+            if (name == "Full moon") lines.Add("New moon in " + Math.Max(1, (int)Math.Round(toNew)) + " days");
+            else lines.Add("Full moon in " + Math.Max(1, (int)Math.Round(toFull)) + " days");
+            try { TonightInfo ti = TonightSky.Get(s); if (ti != null) lines.Add("Tonight: " + ti.Shape.Name + ", " + ti.Where); } catch { }
+            return lines.ToArray();
+        }
     }
 
     static class TonightSky
@@ -1664,7 +2540,8 @@ namespace NightfallMoonClock
             if (SkyManager.SceneKey != "sky")
             {
                 SceneData sd = SceneData.Load(SkyManager.SceneKey, settings);
-                if (sd != null) { sceneR = new SceneRenderer(); sceneR.AllowShootingStars = settings.SkyShooting; sceneR.TrainGapSeconds = settings.TrainGap(); sceneR.Parallax = false; sceneR.ClickStars = sceneR.ClickLights = sceneR.ClickWater = false; sceneR.Build(sd, Width, Height, scale); weather = "clear";  sceneR.SetDawn(SunClock.DawnAmount(settings, DateTime.Now), true);}
+                if (sd != null) { sceneR = new SceneRenderer(); sceneR.AllowShootingStars = settings.SkyShooting; sceneR.TrainGapSeconds = settings.TrainGap(); sceneR.Parallax = false; sceneR.ClickStars = sceneR.ClickLights = sceneR.ClickWater = false; sceneR.Build(sd, Width, Height, scale); weather = "clear";  sceneR.SetDawn(SunClock.DawnAmount(settings, DateTime.Now), true); sceneR.TrailStyle = settings.TrailStyle; sceneR.TrailLength = settings.TrailLength;
+                    sceneR.SetWeather(settings.SceneWeather ? WeatherService.SceneKind(settings) : "clear"); sceneR.SetMoonPhase(settings.RealMoon ? Moon.Phase(DateTime.UtcNow) : -1); sceneR.SetFestival(Festivals.Today(settings, DateTime.Now)); }
             }
             if (sceneR != null) { background = new Bitmap(1, 1); }
             else
@@ -2458,6 +3335,10 @@ namespace NightfallMoonClock
         CheckBox shooting, showers, moon, clockBox, thoughts, pauseMedia, playingBox, parallaxBox, constBox, hourlyBox;
         ComboBox weatherBox, colorsBox, extrasBox, moonBox, wallModeBox;
         CheckBox wallOn, wallBattery, wallSaver, wallStars, wallLights, wallWater, wallParallax;
+        CheckBox pFireflies, pStars, pCat, pWater, pGrassSnow, pBirds, pLamps, pMeteor, pMoon, pTrain, pCatMug, pCatch, pDraw, pWeather, pSurprises;
+        ComboBox hoverBox, trailBox, trailLenBox;
+        CheckBox gentleBox, sceneWeatherBox, realMoonBox, fDiwali, fHoli, fNewYear, fBirthday, musicBox;
+        ComboBox birthMonthBox, birthDayBox, monitorsBox;
         ComboBox trainBox, roomBox, timeBox;
         NumericUpDown wallBelow;
         CheckBox h24Box, playingLineBox, bigMoonBox, tonightBox, alignBox, startupBox, centerBox;
@@ -2507,6 +3388,7 @@ namespace NightfallMoonClock
             col.Controls.Add(Heading("On the desktop"));
             h24Box = Check("Use 24-hour time", s.Use24h); col.Controls.Add(h24Box);
             playingLineBox = Check("Show what's playing", s.ShowPlaying); col.Controls.Add(playingLineBox);
+            gentleBox = Check("Gentle start: the night sky fades in when Windows starts", s.GentleStart); col.Controls.Add(gentleBox);
             bigMoonBox = Check("Large moon beside the time", s.BigMoon); col.Controls.Add(bigMoonBox);
             tonightBox = Check("Show tonight's constellation", s.ShowTonight); col.Controls.Add(tonightBox);
             alignBox = Check("Align to the right", s.AlignRight); col.Controls.Add(alignBox);
@@ -2572,6 +3454,8 @@ namespace NightfallMoonClock
 
             col = pages[2];
             col.Controls.Add(Heading("Scene options"));
+            sceneWeatherBox = Check("Match the real weather (rain, storms, snow, mist, clouds)", s.SceneWeather); col.Controls.Add(sceneWeatherBox);
+            realMoonBox = Check("Show tonight's real moon phase", s.RealMoon); col.Controls.Add(realMoonBox);
             timeBox = Combo(new string[] { "Follow the real sunrise", "Follow the real sunrise and sunset", "Always night", "Always dawn" },
                             new string[] { "sunrise", "both", "night", "dawn" }, s.TimeOfDay);
             col.Controls.Add(Row("Time of day", timeBox, ""));
@@ -2589,6 +3473,9 @@ namespace NightfallMoonClock
             col.Controls.Add(Hint("It only moves while your desktop is showing. When any window is open, it freezes and uses no power."));
             wallModeBox = Combo(new string[] { "One scene I choose", "A different scene each day", "A different scene each time I unlock" }, new string[] { "fixed", "daily", "unlock" }, s.WallMode);
             col.Controls.Add(Row("Which scene", wallModeBox, ""));
+            monitorsBox = Combo(new string[] { "A different scene on each screen", "The same scene on every screen" }, new string[] { "different", "same" }, s.WallMonitors);
+            monitorsBox.Width = 250;
+            col.Controls.Add(Row("With more than one screen", monitorsBox, ""));
             wallSceneValue = Array.IndexOf(SceneData.Keys, s.WallScene) >= 0 ? s.WallScene : "aurora";
             Control wallPick = PickerRow("Scene", wallSceneValue, false, delegate(string k) { wallSceneValue = k; });
             col.Controls.Add(wallPick);
@@ -2596,13 +3483,48 @@ namespace NightfallMoonClock
             wallSaver = Check("Pause when battery saver is on", s.WallPauseSaver); col.Controls.Add(wallSaver);
             wallBelow = Number(s.WallPauseBelow); wallBelow.Maximum = 100;
             col.Controls.Add(Row("Pause when battery is below", wallBelow, "% (0 = never)"));
-            col.Controls.Add(Hint("On empty desktop space:"));
-            wallStars = Check("Click the sky for a shooting star", s.WallClickStars); col.Controls.Add(wallStars);
-            wallLights = Check("Click windows and lamps to switch them on or off", s.WallClickLights); col.Controls.Add(wallLights);
-            wallWater = Check("Click water for ripples", s.WallClickWater); col.Controls.Add(wallWater);
-            wallParallax = Check("Move the mouse to gently shift the view", s.WallParallax); col.Controls.Add(wallParallax);
+            col.Controls.Add(Hint("Clicks, hover effects and surprises are in the Play tab."));
             EventHandler wallSync = delegate { wallPick.Enabled = wallModeBox.SelectedIndex == 0; };
             wallModeBox.SelectedIndexChanged += wallSync; wallSync(null, null);
+
+            // ---------------- Play tab: everything interactive on the live wallpaper, tidy and grouped
+            col = NewPage("Play");
+            col.Controls.Add(Hint("These work on the live wallpaper, on empty desktop space."));
+            col.Controls.Add(Heading("Hover"));
+            hoverBox = Combo(new string[] { "While holding Ctrl", "Always on", "Off" }, new string[] { "ctrl", "always", "off" }, s.PlayHover);
+            col.Controls.Add(Row("Hover effects work", hoverBox, ""));
+            pFireflies = Check("Fireflies drift toward you", s.PlayFireflies); pStars = Check("Stars sparkle as you pass", s.PlayStars);
+            pCat = Check("The cat notices you", s.PlayCat); pWater = Check("Ripples follow you on water", s.PlayWater);
+            pGrassSnow = Check("Grass parts, snow swirls", s.PlayGrassSnow); pBirds = Check("Birds scatter", s.PlayBirds);
+            pLamps = Check("Lamps glow brighter", s.PlayLamps);
+            col.Controls.Add(TwoCols(pFireflies, pStars, pCat, pWater, pGrassSnow, pBirds, pLamps));
+            col.Controls.Add(Heading("Clicks"));
+            wallStars = Check("Sky: a shooting star", s.WallClickStars); wallLights = Check("Windows and lamps: on or off", s.WallClickLights);
+            wallWater = Check("Water: ripples", s.WallClickWater); pMeteor = Check("Hold the sky: meteor shower", s.PlayMeteorHold);
+            pMoon = Check("Moon: phase and tonight's sky", s.PlayMoon); pCatch = Check("Catch a shooting star", s.PlayCatch);
+            pTrain = Check("Track: send the train", s.PlayTrain); pCatMug = Check("Cat and mug react", s.PlayCatMug);
+            pDraw = Check("Drag across stars: draw a constellation", s.PlayDraw); pWeather = Check("Double-click the sky: rain or snow", s.PlayWeather);
+            col.Controls.Add(TwoCols(wallStars, wallLights, wallWater, pMeteor, pMoon, pCatch, pTrain, pCatMug, pDraw, pWeather));
+            col.Controls.Add(Heading("Extras"));
+            trailBox = Combo(new string[] { "Glittering dust", "Glowing ribbon", "Sparkler sparks", "None" }, new string[] { "dust", "ribbon", "sparks", "none" }, s.TrailStyle);
+            col.Controls.Add(Row("Shooting star trails", trailBox, ""));
+            trailLenBox = Combo(new string[] { "Brief (about 1 second)", "Lingering (about 3 seconds)", "Long (up to 6 seconds)" }, new string[] { "brief", "linger", "long" }, s.TrailLength);
+            col.Controls.Add(Row("Trails last", trailLenBox, ""));
+            pSurprises = Check("Rare surprises (a comet, an owl, a fox, a whale)", s.PlaySurprises); col.Controls.Add(pSurprises);
+            wallParallax = Check("Move the mouse to gently shift the view", s.WallParallax); col.Controls.Add(wallParallax);
+            musicBox = Check("Glow softly while music is playing", s.PlayMusicGlow); col.Controls.Add(musicBox);
+            col.Controls.Add(Heading("Special days"));
+            fDiwali = Check("Diwali: diyas and lanterns", s.FestDiwali); fHoli = Check("Holi: clouds of colour", s.FestHoli);
+            fNewYear = Check("New Year's Eve: fireworks", s.FestNewYear); fBirthday = Check("My birthday: lanterns and a heart", s.FestBirthday);
+            col.Controls.Add(TwoCols(fDiwali, fHoli, fNewYear, fBirthday));
+            string[] months = { "Not set", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
+            string[] monthKeys = new string[13]; for (int i = 0; i < 13; i++) monthKeys[i] = i.ToString();
+            birthMonthBox = Combo(months, monthKeys, s.BirthMonth.ToString());
+            string[] days = new string[31], dayKeys = new string[31]; for (int i = 0; i < 31; i++) { days[i] = (i + 1).ToString(); dayKeys[i] = (i + 1).ToString(); }
+            birthDayBox = Combo(days, dayKeys, Math.Max(1, s.BirthDay).ToString());
+            FlowLayoutPanel bday = new FlowLayoutPanel(); bday.AutoSize = true; bday.WrapContents = false; bday.Margin = new Padding(0);
+            bday.Controls.Add(Row("Birthday", birthMonthBox, "")); bday.Controls.Add(birthDayBox); birthDayBox.Margin = new Padding(6, 6, 0, 0); birthDayBox.Width = 60;
+            col.Controls.Add(bday);
 
             // ---------------- Weather tab
             col = NewPage("Weather");
@@ -2702,6 +3624,17 @@ namespace NightfallMoonClock
             choose.Click += open; pb.Click += open;
             row.Controls.Add(l); row.Controls.Add(pb); row.Controls.Add(right);
             return row;
+        }
+
+        // checkboxes laid out in two tidy columns
+        Control TwoCols(params CheckBox[] boxes)
+        {
+            TableLayoutPanel t = new TableLayoutPanel();
+            t.ColumnCount = 2; t.AutoSize = true; t.AutoSizeMode = AutoSizeMode.GrowAndShrink; t.Margin = new Padding(0, 0, 0, 4);
+            // a fixed first column so every two-column group on the tab lines up
+            t.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 290));   // the form's DPI scaling enlarges this on bigger displays t.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            for (int i = 0; i < boxes.Length; i++) { boxes[i].Margin = new Padding(3, 2, 18, 2); t.Controls.Add(boxes[i], i % 2, i / 2); }
+            return t;
         }
 
         FlowLayoutPanel NewPage(string title)
@@ -2816,6 +3749,17 @@ namespace NightfallMoonClock
             settings.TrainEvery = (string)((object[])trainBox.Tag)[trainBox.SelectedIndex];
             settings.RoomView = (string)((object[])roomBox.Tag)[roomBox.SelectedIndex];
             settings.TimeOfDay = (string)((object[])timeBox.Tag)[timeBox.SelectedIndex];
+            settings.SceneWeather = sceneWeatherBox.Checked; settings.RealMoon = realMoonBox.Checked; settings.GentleStart = gentleBox.Checked;
+            settings.PlayHover = (string)((object[])hoverBox.Tag)[hoverBox.SelectedIndex];
+            settings.TrailStyle = (string)((object[])trailBox.Tag)[trailBox.SelectedIndex];
+            settings.PlayMusicGlow = musicBox.Checked; settings.FestDiwali = fDiwali.Checked; settings.FestHoli = fHoli.Checked; settings.FestNewYear = fNewYear.Checked; settings.FestBirthday = fBirthday.Checked;
+            settings.BirthMonth = int.Parse((string)((object[])birthMonthBox.Tag)[birthMonthBox.SelectedIndex]); settings.BirthDay = int.Parse((string)((object[])birthDayBox.Tag)[birthDayBox.SelectedIndex]);
+            settings.WallMonitors = (string)((object[])monitorsBox.Tag)[monitorsBox.SelectedIndex];
+            settings.TrailLength = (string)((object[])trailLenBox.Tag)[trailLenBox.SelectedIndex];
+            settings.PlayFireflies = pFireflies.Checked; settings.PlayStars = pStars.Checked; settings.PlayCat = pCat.Checked; settings.PlayWater = pWater.Checked;
+            settings.PlayGrassSnow = pGrassSnow.Checked; settings.PlayBirds = pBirds.Checked; settings.PlayLamps = pLamps.Checked;
+            settings.PlayMeteorHold = pMeteor.Checked; settings.PlayMoon = pMoon.Checked; settings.PlayTrain = pTrain.Checked; settings.PlayCatMug = pCatMug.Checked;
+            settings.PlayCatch = pCatch.Checked; settings.PlayDraw = pDraw.Checked; settings.PlayWeather = pWeather.Checked; settings.PlaySurprises = pSurprises.Checked;
             settings.WallClickStars = wallStars.Checked; settings.WallClickLights = wallLights.Checked;
             settings.WallClickWater = wallWater.Checked; settings.WallParallax = wallParallax.Checked;
             settings.SkyPlaying = playingBox.Checked;

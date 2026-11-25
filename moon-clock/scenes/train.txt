@@ -157,3 +157,6 @@ spritewheel train 130.0 226.0 24
 spritewheel train 190.0 226.0 24
 spritewheel train 250.0 226.0 24
 dawn train-dawn.jpg
+moon 288 162 30
+surprise comet
+surprise owl 150 260 1750 460

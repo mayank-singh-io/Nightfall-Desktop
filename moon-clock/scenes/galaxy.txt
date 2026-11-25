@@ -154,3 +154,5 @@ layer clouds-galaxy.png 420 6
 satellite 14000
 shots 6000
 dawn galaxy-dawn.jpg
+moon 307.2 172.8 26
+surprise comet

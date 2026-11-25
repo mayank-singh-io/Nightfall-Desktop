@@ -35,6 +35,8 @@ namespace NightfallMoonClock
         [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out int value, int size);
         [DllImport("kernel32.dll")] public static extern bool GetSystemPowerStatus(out POWER status);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool SystemParametersInfo(int action, int param, string value, int winIni);
+        [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point p);
+        [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
 
         // The window behind the desktop icons that Windows draws the wallpaper into.
         public static IntPtr FindWallpaperHost()
@@ -110,6 +112,7 @@ namespace NightfallMoonClock
         readonly Timer frame = new Timer();
         double lastMs, lastCheck = -99999;
         bool running;
+        public bool IsShowing { get { return running && !IsDisposed; } }
         public IntPtr HostHandle;
 
         public WallpaperForm(Settings s, Screen sc, SceneData data)
@@ -129,6 +132,8 @@ namespace NightfallMoonClock
             scene.ClickStars = s.WallClickStars; scene.ClickLights = s.WallClickLights; scene.ClickWater = s.WallClickWater; scene.Parallax = s.WallParallax;
             scene.Build(data, screen.Width, screen.Height, ui);
             scene.SetDawn(SunClock.DawnAmount(s, DateTime.Now), true);
+            scene.MoonInfo = delegate { return MoonCard.Lines(settings); };
+            UpdateOptions(s);
             frame.Interval = 40;
             frame.Tick += delegate { Tick(); };
         }
@@ -160,9 +165,28 @@ namespace NightfallMoonClock
                 lastCheck = t;
                 if (!WallpaperNative.IsWindow(HostHandle)) { LiveWallpaper.Rebuild(); return; }   // Explorer restarted
                 scene.SetDawn(SunClock.DawnAmount(settings, DateTime.Now));
+                if (DateTime.Now - lastSkyCheck > TimeSpan.FromMinutes(1))
+                {
+                    lastSkyCheck = DateTime.Now;
+                    scene.SetWeather(settings.SceneWeather ? WeatherService.SceneKind(settings) : "clear");
+                    scene.SetMoonPhase(settings.RealMoon ? Moon.Phase(DateTime.UtcNow) : -1);
+                    scene.SetFestival(Festivals.Today(settings, DateTime.Now));
+                }
+                scene.SetMusicPlaying(settings.PlayMusicGlow && NowPlaying.Last != null);
                 running = !SkyManager.Active && WallpaperGate.BatteryAllows(settings) && !WallpaperGate.ScreenHasWindows(screen);
             }
             if (!running) { lastMs = t; return; }   // frozen: keeps the last frame, uses no CPU
+            // hover and press-and-hold, read straight from the mouse while the desktop is showing
+            {
+                Point cp = Cursor.Position;
+                bool over = screen.Contains(cp) && IsDesktopAt(cp);
+                bool ctrl = (WallpaperNative.GetAsyncKeyState(0x11) & 0x8000) != 0, left = (WallpaperNative.GetAsyncKeyState(0x01) & 0x8000) != 0;
+                bool active = over && (settings.PlayHover == "always" || (settings.PlayHover == "ctrl" && ctrl));
+                scene.SetHover(cp.X - screen.X, cp.Y - screen.Y, active);
+                if (left && !wasLeft && over && !IsIconAt(cp)) { scene.PointerDown(cp.X - screen.X, cp.Y - screen.Y, t); pressing = true; }
+                if (!left && wasLeft && pressing) { scene.PointerUp(cp.X - screen.X, cp.Y - screen.Y, t); pressing = false; }
+                wasLeft = left;
+            }
             if (settings.WallParallax)
             {
                 Point c = Cursor.Position;
@@ -174,8 +198,28 @@ namespace NightfallMoonClock
         }
 
         public Rectangle ScreenBounds { get { return screen; } }
+        bool wasLeft, pressing;
+        DateTime lastSkyCheck = DateTime.Now;
+        static bool IsDesktopAt(Point p)
+        {
+            StringBuilder sb = new StringBuilder(64);
+            WallpaperNative.GetClassName(WallpaperNative.WindowFromPoint(p), sb, 64);
+            return sb.ToString() == "SysListView32";
+        }
+        static bool IsIconAt(Point p)
+        {
+            try { AutomationElement el = AutomationElement.FromPoint(new System.Windows.Point(p.X, p.Y)); return el != null && el.Current.ControlType == ControlType.ListItem; }
+            catch { return false; }
+        }
         public void UpdateOptions(Settings s)
         {
+            scene.HFireflies = s.PlayFireflies; scene.HStars = s.PlayStars; scene.HCat = s.PlayCat; scene.HWater = s.PlayWater;
+            scene.HGrassSnow = s.PlayGrassSnow; scene.HBirds = s.PlayBirds; scene.HLamps = s.PlayLamps;
+            scene.CMeteorHold = s.PlayMeteorHold; scene.CMoon = s.PlayMoon; scene.CTrain = s.PlayTrain; scene.CCatMug = s.PlayCatMug;
+            scene.CCatch = s.PlayCatch; scene.CDraw = s.PlayDraw; scene.CWeather = s.PlayWeather; scene.Surprises = s.PlaySurprises;
+            scene.TrailStyle = s.TrailStyle; scene.TrailLength = s.TrailLength;
+            scene.SetWeather(s.SceneWeather ? WeatherService.SceneKind(s) : "clear"); scene.SetMoonPhase(s.RealMoon ? Moon.Phase(DateTime.UtcNow) : -1);
+            scene.SetFestival(Festivals.Today(s, DateTime.Now));
             scene.ClickStars = s.WallClickStars; scene.ClickLights = s.WallClickLights; scene.ClickWater = s.WallClickWater;
             scene.Parallax = s.WallParallax; scene.AllowShootingStars = s.SkyShooting;
             if (!s.WallParallax) scene.SetPointer(0, 0);
@@ -262,6 +306,8 @@ namespace NightfallMoonClock
     {
         static readonly List<WallpaperForm> forms = new List<WallpaperForm>();
         static Settings current;
+        // true while at least one screen is actually showing the live wallpaper (not covered by windows)
+        public static bool AnyShowing { get { foreach (WallpaperForm f in forms) if (f.IsShowing) return true; return false; } }
         static string unlockPick;
         static readonly Random rng = new Random();
         static bool hooked;
@@ -276,7 +322,7 @@ namespace NightfallMoonClock
         static string builtSignature;
         static string Signature(Settings s)
         {
-            return s.WallpaperOn + "|" + s.WallMode + "|" + s.WallScene + "|" + s.TrainEvery + "|" + s.RoomView + "|" + Screen.AllScreens.Length;
+            return s.WallpaperOn + "|" + s.WallMode + "|" + s.WallScene + "|" + s.TrainEvery + "|" + s.RoomView + "|" + Screen.AllScreens.Length + "|" + s.WallMonitors;
         }
 
         public static void Apply(Settings s)
@@ -310,9 +356,19 @@ namespace NightfallMoonClock
             string key = SceneData.Resolve(CurrentKey(current), current);   // the same Cozy Room view on every monitor
             IntPtr host = WallpaperNative.FindWallpaperHost();
             if (host == IntPtr.Zero) return;
+            int screenIndex = 0;
             foreach (Screen sc in Screen.AllScreens)
             {
-                SceneData data = SceneData.Load(key, current);   // each monitor gets its own copy
+                string k = key;
+                if (screenIndex > 0 && current.WallMonitors != "same")   // other screens: a different scene, steady for the day
+                {
+                    int baseIdx = Array.IndexOf(SceneData.Keys, CurrentKey(current)); if (baseIdx < 0) baseIdx = 0;
+                    int idx = (baseIdx + screenIndex * 7 + DateTime.Now.DayOfYear) % SceneData.Keys.Length;
+                    if (SceneData.Keys[idx] == CurrentKey(current)) idx = (idx + 1) % SceneData.Keys.Length;
+                    k = SceneData.Resolve(SceneData.Keys[idx], current);
+                }
+                screenIndex++;
+                SceneData data = SceneData.Load(k, current);   // each monitor gets its own copy
                 if (data == null) continue;
                 WallpaperForm f = new WallpaperForm(current, sc, data);
                 f.Attach(host);

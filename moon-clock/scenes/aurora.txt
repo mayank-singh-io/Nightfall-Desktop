@@ -149,9 +149,9 @@ star 39.4 394.1 0.56
 star 246.4 13.7 0.71
 star 1833.7 354.2 1.31
 star 332.1 178.1 1.72
-fade aurora-lights-0.png,aurora-lights-1.png,aurora-lights-2.png,aurora-lights-3.png 0 9
+fade aurora-lights-0.png,aurora-lights-1.png,aurora-lights-2.png,aurora-lights-3.png 0 3.5
 front aurora-front.png
-fadeafter aurora-reflection-0.png,aurora-reflection-1.png,aurora-reflection-2.png,aurora-reflection-3.png 713 9
+fadeafter aurora-reflection-0.png,aurora-reflection-1.png,aurora-reflection-2.png,aurora-reflection-3.png 713 3.5
 shimmer 1050.3 1134.9 731.6
 shimmer 977.5 1022.2 836.2
 shimmer 64.5 171.8 718.9
@@ -190,3 +190,6 @@ shimmer 164.2 279.7 738.4
 shimmer 243.4 359.0 778.6
 dawn aurora-dawn.jpg
 dawnfront aurora-front-dawn.png
+surprise comet
+surprise owl 150 380 1750 560
+water 0 703 1920 1016
